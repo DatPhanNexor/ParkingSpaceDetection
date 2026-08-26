@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "15673:15672"
+      - "5673:5672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - parking-net
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --port 6380
+    ports:
+      - "6380:6380"
+    volumes:
+      - redis_data:/data
+    networks:
+      - parking-net
+
+  auth-service:
+    build: 
+      context: ..
+      dockerfile: backend_microservices/Dockerfile
+    command: ["uvicorn", "services.auth_service.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+    environment:
+      - DB_HOST=host.docker.internal
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=ai_parking_system
+      - JWT_SECRET=supersecret123
+    networks:
+      - parking-net
+    depends_on:
+      - redis
+      - rabbitmq
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  ai-detection-service:
+    build: 
+      context: ..
+      dockerfile: backend_microservices/Dockerfile
+    command: ["uvicorn", "services.ai_detection_service.main:app", "--host", "0.0.0.0", "--port", "8002"]
+    ports:
+      - "8002:8002"
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - parking-net
+    depends_on:
+      - rabbitmq
+
+  parking-billing-service:
+    build: 
+      context: ..
+      dockerfile: backend_microservices/Dockerfile
+    command: ["uvicorn", "services.parking_billing_service.main:app", "--host", "0.0.0.0", "--port", "8003"]
+    ports:
+      - "8003:8003"
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis://redis:6380/0
+      - DB_HOST=host.docker.internal
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=ai_parking_system
+    networks:
+      - parking-net
+    depends_on:
+      - rabbitmq
+      - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  reporting-service:
+    build: 
+      context: ..
+      dockerfile: backend_microservices/Dockerfile
+    command: ["uvicorn", "services.reporting_service.main:app", "--host", "0.0.0.0", "--port", "8004"]
+    ports:
+      - "8004:8004"
+    environment:
+      - DB_HOST=host.docker.internal
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=ai_parking_system
+      - REDIS_URL=redis://redis:6380/0
+      - JWT_SECRET=supersecret123
+    networks:
+      - parking-net
+    depends_on:
+      - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  streamlit-admin:
+    build: 
+      context: ..
+      dockerfile: backend_microservices/Dockerfile
+    command: ["streamlit", "run", "streamlit_admin/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://auth-service:8001/api/v1
+    networks:
+      - parking-net
+    depends_on:
+      - auth-service
+      - reporting-service
+
+networks:
+  parking-net:
+    driver: bridge
+
+volumes:
+  rabbitmq_data:
+  redis_data:

@@ -1,0 +1,68 @@
+name: Smart Parking CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install hatchling pytest pytest-asyncio
+          pip install -e ./backend_microservices
+          
+      - name: Run Tests
+        run: |
+          cd backend_microservices
+          pytest tests/unit
+
+  flutter-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          
+      - name: Install dependencies
+        run: |
+          cd flutter_mobile_app
+          flutter pub get
+          
+      - name: Analyze
+        run: |
+          cd flutter_mobile_app
+          flutter analyze
+          
+      - name: Test
+        run: |
+          cd flutter_mobile_app
+          flutter test
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build Docker Image
+        run: |
+          docker build -t smart-parking-microservices -f backend_microservices/Dockerfile .
+          
+      - name: Check Compose
+        run: |
+          cd infrastructure
+          docker compose config
