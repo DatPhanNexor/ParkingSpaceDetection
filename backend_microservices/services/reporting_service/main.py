@@ -6,6 +6,25 @@ from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any
 import csv
 import io
+import logging
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    db_host: str = "127.0.0.1"
+    db_port: int = 3306
+    db_user: str = "root"
+    db_password: str = ""
+    db_name: str = "ai_parking_system"
+    redis_url: str = "redis://127.0.0.1:6380/0"
+    jwt_secret: str = "supersecret123"
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("reporting_service")
 
 from shared.database import get_db_connection, redis_client
 from shared.security import get_current_user, require_role, decode_access_token
@@ -35,6 +54,14 @@ manager = ConnectionManager()
 @app.get("/health")
 def health():
     return {"status": "up"}
+
+@app.get("/ready")
+def ready():
+    return {"status": "ready"}
+
+@app.get("/metrics")
+def metrics():
+    return {"active_websocket_connections": len(manager.active_connections)}
 
 @app.get("/api/v1/slots")
 async def get_slots(current_user: dict = Depends(get_current_user)):

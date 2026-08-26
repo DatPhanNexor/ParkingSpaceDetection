@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 import ultralytics
 import cv2
 import numpy as np
+import torch
 
 # We import the slots template and thresholds safely
 try:
@@ -33,8 +34,11 @@ except ImportError:
 
 class LegacyAIAdapter:
     def __init__(self):
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.model_yolov8s = ultralytics.YOLO(str(PROJECT_ROOT / "yolov8s.pt"))
+        self.model_yolov8s.to(self.device)
         self.model_yolo11n_seg = ultralytics.YOLO(str(PROJECT_ROOT / "yolo11n-seg.pt"))
+        self.model_yolo11n_seg.to(self.device)
         self.slots = DEFAULT_SLOTS_TEMPLATE
 
     def detect_image(self, image_path: str):

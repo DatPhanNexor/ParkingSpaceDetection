@@ -1,0 +1,7 @@
+{
+    "model": "yolov8s.pt",
+    "model_checksum": "1f47a78bf100391c2a140b7ac73a1caae18c32779be7d310658112f7ac9aa78a",
+    "dataset_yaml_checksum": null,
+    "device": "cuda",
+    "metrics": null
+}

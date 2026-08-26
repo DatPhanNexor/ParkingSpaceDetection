@@ -3,8 +3,22 @@ import json
 import asyncio
 import uuid
 import datetime
+import logging
 from fastapi import FastAPI, BackgroundTasks
+from pydantic_settings import BaseSettings
 import aio_pika
+
+class Settings(BaseSettings):
+    rabbitmq_url: str = "amqp://guest:guest@127.0.0.1:5673/"
+    redis_url: str = "redis://127.0.0.1:6380/0"
+    
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("parking_billing")
 from contextlib import asynccontextmanager
 
 from shared.events import (
@@ -12,13 +26,19 @@ from shared.events import (
 )
 from shared.database import get_db_connection, get_db_transaction, redis_client, acquire_lock
 
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@127.0.0.1:5673/")
+from shared.database import get_db_connection, get_db_transaction, redis_client, acquire_lock
 
 async def process_detection_event(event: EventEnvelope):
     payload = DetectionCompletedPayload(**event.payload)
     slot_id = payload.slot_id
     status = payload.status.value
     event_id = event.event_id
+    
+    # Extract explicitly requested parameters
+    observed_at_utc = event.occurred_at
+    source_elapsed_seconds = payload.source_elapsed_seconds if hasattr(payload, 'source_elapsed_seconds') else 0
+    
+    logger.info(f"Processing event {event_id} for slot {slot_id} with status {status}")
     
     # 1. Idempotency Check in MySQL
     async with get_db_transaction() as conn:
@@ -141,7 +161,7 @@ async def process_detection_event(event: EventEnvelope):
                     )
 
 async def consume_events():
-    connection = await aio_pika.connect_robust(RABBITMQ_URL)
+    connection = await aio_pika.connect_robust(settings.rabbitmq_url)
     async with connection:
         channel = await connection.channel()
         await channel.set_qos(prefetch_count=10)
@@ -199,3 +219,12 @@ app = FastAPI(title="Parking and Billing Service", lifespan=lifespan)
 @app.get("/health")
 def health():
     return {"status": "up"}
+
+@app.get("/ready")
+def ready():
+    return {"status": "ready"}
+
+@app.get("/metrics")
+def metrics():
+    return {"events_processed": 0} # Stub
+

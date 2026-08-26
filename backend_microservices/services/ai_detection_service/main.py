@@ -1,8 +1,21 @@
 import os
 import asyncio
 from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
-from pydantic import BaseModel
+from pydantic_settings import BaseSettings
 from typing import Dict, Any
+import logging
+from pydantic import BaseModel
+
+class Settings(BaseSettings):
+    rabbitmq_url: str = "amqp://guest:guest@127.0.0.1:5673/"
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("ai_detection")
 
 from shared.events import (
     get_publisher, EventEnvelope, DetectionCompletedPayload, SlotStatus
@@ -61,6 +74,11 @@ async def detect_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
     # Stub for video processing. In real system, we'd save the file and process it frame by frame in background.
     job_id = "video-" + os.urandom(4).hex()
     return DetectionResponse(status="accepted", job_id=job_id, message="Video processing started")
+
+@app.get("/api/v1/detections/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    # Stub for job status
+    return {"job_id": job_id, "status": "processing"}
 
 class StreamRequest(BaseModel):
     source_url: str

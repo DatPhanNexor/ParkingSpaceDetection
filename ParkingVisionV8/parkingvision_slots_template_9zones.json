@@ -1,0 +1,100 @@
+{
+  "version": 14,
+  "note": "Canonical 9 fixed parking zones for the toy parking board.",
+  "canonical_size": [
+    1000,
+    650
+  ],
+  "slots": [
+    {
+      "id": 1,
+      "name": "top_car_zone_1",
+      "box": [
+        0.155,
+        0.08,
+        0.275,
+        0.465
+      ]
+    },
+    {
+      "id": 2,
+      "name": "top_car_zone_2",
+      "box": [
+        0.275,
+        0.08,
+        0.395,
+        0.465
+      ]
+    },
+    {
+      "id": 3,
+      "name": "top_car_zone_3",
+      "box": [
+        0.395,
+        0.08,
+        0.52,
+        0.465
+      ]
+    },
+    {
+      "id": 4,
+      "name": "top_car_zone_4",
+      "box": [
+        0.52,
+        0.08,
+        0.65,
+        0.465
+      ]
+    },
+    {
+      "id": 5,
+      "name": "bottom_car_zone_5",
+      "box": [
+        0.065,
+        0.535,
+        0.245,
+        0.895
+      ]
+    },
+    {
+      "id": 6,
+      "name": "bottom_car_zone_6",
+      "box": [
+        0.245,
+        0.535,
+        0.425,
+        0.895
+      ]
+    },
+    {
+      "id": 7,
+      "name": "bottom_car_zone_7",
+      "box": [
+        0.425,
+        0.535,
+        0.62,
+        0.895
+      ]
+    },
+    {
+      "id": 8,
+      "name": "right_horizontal_zone_8",
+      "box": [
+        0.765,
+        0.095,
+        0.965,
+        0.245
+      ]
+    },
+    {
+      "id": 9,
+      "name": "right_horizontal_zone_9",
+      "box": [
+        0.765,
+        0.235,
+        0.965,
+        0.395
+      ]
+    }
+  ]
+}

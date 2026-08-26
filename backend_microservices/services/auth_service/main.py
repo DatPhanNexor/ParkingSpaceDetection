@@ -3,6 +3,27 @@ from pydantic import BaseModel
 from typing import Optional, List
 import uuid
 import datetime
+import logging
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    jwt_secret: str = "supersecret123"
+    db_host: str = "127.0.0.1"
+    db_port: int = 3306
+    db_user: str = "root"
+    db_password: str = ""
+    db_name: str = "ai_parking_system"
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("auth_service")
+
+# Simple in-memory rate limiting for login
+LOGIN_ATTEMPTS = {}
 
 from shared.database import get_db_connection, get_db_transaction
 from shared.security import (
@@ -13,7 +34,21 @@ from shared.security import (
     require_role
 )
 
+)
+
 app = FastAPI(title="Authentication Service")
+
+@app.get("/health")
+def health():
+    return {"status": "up"}
+
+@app.get("/ready")
+def ready():
+    return {"status": "ready"}
+
+@app.get("/metrics")
+def metrics():
+    return {"active_users": 0} # Stub for metrics
 
 class LoginRequest(BaseModel):
     username: str
@@ -47,15 +82,31 @@ class UserUpdateRequest(BaseModel):
 
 @app.post("/api/v1/auth/login", response_model=TokenResponse)
 async def login(req: LoginRequest):
+    # Rate limiting check
+    now = datetime.datetime.utcnow()
+    attempts = LOGIN_ATTEMPTS.get(req.username, [])
+    attempts = [t for t in attempts if now - t < datetime.timedelta(minutes=15)]
+    if len(attempts) >= 5:
+        logger.warning(f"Rate limit exceeded for user: {req.username}")
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
+    
+    LOGIN_ATTEMPTS[req.username] = attempts + [now]
+
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute("SELECT id, username, password_hash, ho_ten, role, is_active FROM tai_khoan WHERE username = %s", (req.username,))
             user = await cur.fetchone()
             
     if not user or not verify_password(req.password, user[2]):
+        logger.warning(f"Failed login attempt for user: {req.username}")
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     
+    # Clear attempts on success
+    if req.username in LOGIN_ATTEMPTS:
+        del LOGIN_ATTEMPTS[req.username]
+        
     if not user[5]: # is_active
+        logger.warning(f"Login attempt on disabled account: {req.username}")
         raise HTTPException(status_code=403, detail="Account is disabled")
 
     # Generate tokens
@@ -89,16 +140,29 @@ async def refresh(req: RefreshRequest):
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT token_hash, revoked, expires_at FROM refresh_tokens WHERE user_id = %s AND revoked = 0 AND expires_at > NOW()",
+                "SELECT token_hash, revoked, expires_at FROM refresh_tokens WHERE user_id = %s",
                 (user_id,)
             )
             rows = await cur.fetchall()
             
     valid_hash = None
+    is_reused = False
     for row in rows:
         if verify_password(raw_token, row[0]):
-            valid_hash = row[0]
+            if row[1] == 1: # revoked
+                is_reused = True
+                break
+            if row[2] > datetime.datetime.utcnow():
+                valid_hash = row[0]
             break
+            
+    if is_reused:
+        # Token reuse detected! Revoke all tokens for this user
+        logger.error(f"Refresh token reuse detected for user {user_id}. Revoking all tokens.")
+        async with get_db_transaction() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("UPDATE refresh_tokens SET revoked = 1 WHERE user_id = %s", (user_id,))
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
             
     if not valid_hash:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
