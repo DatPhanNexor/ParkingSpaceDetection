@@ -27,6 +27,7 @@ from shared.events import (
 from shared.database import get_db_connection, get_db_transaction, redis_client, acquire_lock
 
 from shared.database import get_db_connection, get_db_transaction, redis_client, acquire_lock
+from adapters.legacy_billing_adapter import calculate_fee, BillingConfig
 
 async def process_detection_event(event: EventEnvelope):
     payload = DetectionCompletedPayload(**event.payload)
@@ -116,12 +117,13 @@ async def process_detection_event(event: EventEnvelope):
                         config = (20000, 5000, 5000) # Default
             
             gia_moi_gio, buoc_lam_tron, phi_toi_thieu = config
-            hours = max(1, (duration_seconds / 3600))
-            raw_fee = hours * gia_moi_gio
             
-            # Rounding
-            fee = int(round(raw_fee / buoc_lam_tron) * buoc_lam_tron)
-            fee = max(fee, phi_toi_thieu)
+            billing_config = BillingConfig(
+                hourly_rate_vnd=gia_moi_gio,
+                rounding_vnd=buoc_lam_tron,
+                minimum_fee_vnd=phi_toi_thieu
+            )
+            fee = calculate_fee(duration_seconds, billing_config)
             
             # Update Redis
             await redis_client.hmset(state_key, {
@@ -159,6 +161,45 @@ async def process_detection_event(event: EventEnvelope):
                         "INSERT INTO outbox_events (event_type, payload) VALUES (%s, %s)",
                         ("parking.session.completed", json.dumps(outbox_payload))
                     )
+
+async def outbox_poller():
+    publisher = await get_publisher()
+    while True:
+        try:
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cur:
+                    # Select pending events
+                    await cur.execute("SELECT id, event_type, payload FROM outbox_events ORDER BY id ASC LIMIT 50")
+                    rows = await cur.fetchall()
+                    
+                    if not rows:
+                        await asyncio.sleep(2)
+                        continue
+                        
+                    for row in rows:
+                        event_id = row[0]
+                        event_type = row[1]
+                        payload_str = row[2]
+                        
+                        # Use outbox event ID as correlation
+                        event = EventEnvelope(
+                            event_type=event_type,
+                            source="parking-billing-service",
+                            payload=json.loads(payload_str),
+                            correlation_id=str(event_id)
+                        )
+                        
+                        # Publish to RMQ
+                        await publisher.publish(event, routing_key=event_type)
+                        
+                        # Delete from outbox
+                        await cur.execute("DELETE FROM outbox_events WHERE id = %s", (event_id,))
+                    
+                    await conn.commit()
+        except Exception as e:
+            logger.error(f"Outbox poller error: {e}")
+            await asyncio.sleep(5)
+
 
 async def consume_events():
     connection = await aio_pika.connect_robust(settings.rabbitmq_url)
@@ -211,8 +252,10 @@ async def lifespan(app: FastAPI):
                 })
                 
     task = asyncio.create_task(consume_events())
+    outbox_task = asyncio.create_task(outbox_poller())
     yield
     task.cancel()
+    outbox_task.cancel()
     
 app = FastAPI(title="Parking and Billing Service", lifespan=lifespan)
 

@@ -23,7 +23,14 @@ class DetectionCompletedPayload(BaseModel):
     slot_id: str
     status: SlotStatus
     confidence: float
-    source_type: str # "WEBCAM", "DROIDCAM", "VIDEO"
+    measurement_valid: bool
+    board_lock_valid: bool
+    camera_ok: bool
+    status_reason: str
+    stable_frame_count: int
+    observed_at_utc: str
+    source_elapsed_seconds: float
+    source_type: str
 
 class ParkingSlotUpdatedPayload(BaseModel):
     slot_id: str

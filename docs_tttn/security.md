@@ -1,3 +1,1 @@
-# SECURITY
-
-Details will be populated.
+# Security\n\n- PBKDF2-HMAC-SHA256 (Tương thích Django).\n- JWT Access / Refresh Token.\n- Không lưu hardcoded secrets, dùng Pydantic Settings.

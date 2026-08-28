@@ -7,11 +7,13 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from passlib.context import CryptContext
 
 # Configuration
-JWT_SECRET = os.getenv("JWT_SECRET", "default-insecure-secret-do-not-use-in-prod")
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    raise ValueError("JWT_SECRET environment variable is not set")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+pwd_context = CryptContext(schemes=["django_pbkdf2_sha256"], deprecated="auto")
 security = HTTPBearer()
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

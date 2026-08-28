@@ -1,22 +1,30 @@
-FROM python:3.10-slim
+FROM python:3.11-slim as builder
+
+WORKDIR /app
+COPY backend_microservices/requirements.txt requirements.txt
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+FROM python:3.11-slim
+
+# Create non-root user
+RUN useradd -m -s /bin/bash appuser
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+# Copy dependencies
+COPY --from=builder /root/.local /home/appuser/.local
+ENV PATH=/home/appuser/.local/bin:$PATH
 
-COPY backend_microservices/pyproject.toml .
+# Install cv2 dependencies
+RUN apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir hatchling \
-    && pip install --no-cache-dir -e .
+COPY . .
 
-# We'll copy the shared layer and all services, then the command will define what runs
-COPY backend_microservices/ ./backend_microservices/
-COPY yolo* ./
-COPY ParkingVisionV8/ ./ParkingVisionV8/
+# Set permissions
+RUN chown -R appuser:appuser /app
 
-ENV PYTHONPATH=/app/backend_microservices:/app
+USER appuser
 
-CMD ["uvicorn", "backend_microservices.services.auth_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8000
+
+CMD ["uvicorn", "services.auth_service.main:app", "--host", "0.0.0.0", "--port", "8000"]

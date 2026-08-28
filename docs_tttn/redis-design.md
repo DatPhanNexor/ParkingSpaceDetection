@@ -1,3 +1,1 @@
-# REDIS DESIGN
-
-Details will be populated.
+# Redis Design\n\nSử dụng Redis làm Cache và Distributed Lock:\n- `parking:slot:{slot_id}`: Trạng thái hiện tại.\n- `parking:lock:{slot_id}`: Khóa atom Lua.

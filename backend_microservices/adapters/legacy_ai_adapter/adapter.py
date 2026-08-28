@@ -54,7 +54,14 @@ class LegacyAIAdapter:
         # Default all slots to EMPTY
         for slot in self.slots:
             slot_id_str = str(slot["id"])
-            detected_status[slot_id_str] = "EMPTY"
+            detected_status[slot_id_str] = {
+                "status": "EMPTY",
+                "confidence": 0.0,
+                "measurement_valid": True,
+                "board_lock_valid": True,
+                "camera_ok": True,
+                "status_reason": "No objects detected"
+            }
             
         if not results:
             return detected_status
@@ -73,11 +80,22 @@ class LegacyAIAdapter:
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
             cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
             
+            conf = float(box.conf.item())
+            
             # naive mapping to slot based on center
             for slot in self.slots:
                 s_x1, s_y1, s_x2, s_y2 = slot["box"]
                 abs_sx1, abs_sy1, abs_sx2, abs_sy2 = s_x1*w, s_y1*h, s_x2*w, s_y2*h
                 if abs_sx1 <= cx <= abs_sx2 and abs_sy1 <= cy <= abs_sy2:
-                    detected_status[str(slot["id"])] = "OCCUPIED"
+                    slot_id_str = str(slot["id"])
+                    if conf > detected_status[slot_id_str]["confidence"]:
+                        detected_status[slot_id_str] = {
+                            "status": "OCCUPIED",
+                            "confidence": conf,
+                            "measurement_valid": True,
+                            "board_lock_valid": True,
+                            "camera_ok": True,
+                            "status_reason": "Object detected"
+                        }
                     
         return detected_status

@@ -2,7 +2,8 @@ import streamlit as st
 import requests
 import os
 
-API_URL = os.getenv("API_URL", "http://127.0.0.1:8001/api/v1")
+AUTH_API_URL = os.getenv("AUTH_API_URL", "http://127.0.0.1:8001/api/v1")
+REPORTING_API_URL = os.getenv("REPORTING_API_URL", "http://127.0.0.1:8004/api/v1")
 
 st.set_page_config(page_title="Smart Parking Admin", layout="wide")
 
@@ -18,7 +19,7 @@ def login():
         
         if submit:
             try:
-                res = requests.post(f"{API_URL}/auth/login", json={"username": username, "password": password})
+                res = requests.post(f"{AUTH_API_URL}/auth/login", json={"username": username, "password": password})
                 if res.status_code == 200:
                     st.session_state.token = res.json()["access_token"]
                     st.success("Logged in successfully!")
@@ -41,7 +42,7 @@ def dashboard():
     with tab1:
         st.header("System Overview")
         try:
-            res = requests.get(f"{API_URL}/reports/summary", headers=headers)
+            res = requests.get(f"{REPORTING_API_URL}/reports/summary", headers=headers)
             if res.status_code == 200:
                 data = res.json()
                 col1, col2, col3 = st.columns(3)
@@ -56,7 +57,7 @@ def dashboard():
     with tab2:
         st.header("Parking Slots")
         try:
-            res = requests.get(f"{API_URL}/slots", headers=headers)
+            res = requests.get(f"{REPORTING_API_URL}/slots", headers=headers)
             if res.status_code == 200:
                 slots = res.json()
                 for slot in slots:
@@ -69,7 +70,7 @@ def dashboard():
     with tab3:
         st.header("User Management")
         try:
-            res = requests.get(f"{API_URL}/users", headers=headers)
+            res = requests.get(f"{AUTH_API_URL}/users", headers=headers)
             if res.status_code == 200:
                 users = res.json()
                 st.table(users)

@@ -1,3 +1,1 @@
-# API GUIDE
-
-Details will be populated.
+# API Guide\n\n## Endpoints\n- `POST /api/v1/auth/login`: Xác thực.\n- `GET /api/v1/slots`: Lấy trạng thái slot.\n- `GET /api/v1/sessions/active`: Lấy phiên đỗ xe.\n- `WS /ws/parking`: Cập nhật realtime.

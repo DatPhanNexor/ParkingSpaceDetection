@@ -1,3 +1,1 @@
-# DEMO SCRIPT
-
-Details will be populated.
+# Demo Script\n\n1. Chạy `docker compose up -d`.\n2. Chạy Flutter app.\n3. Đăng nhập với admin/admin.\n4. Xem Dashboard cập nhật Realtime.

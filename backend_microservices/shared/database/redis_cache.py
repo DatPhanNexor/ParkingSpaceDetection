@@ -20,7 +20,11 @@ async def acquire_lock(lock_key: str, timeout: int = 10):
         yield acquired
     finally:
         if acquired:
-            # Only release if we still own it
-            current = await redis_client.get(lock_key)
-            if current == lock_value:
-                await redis_client.delete(lock_key)
+            script = """
+            if redis.call("get",KEYS[1]) == ARGV[1] then
+                return redis.call("del",KEYS[1])
+            else
+                return 0
+            end
+            """
+            await redis_client.eval(script, 1, lock_key, lock_value)

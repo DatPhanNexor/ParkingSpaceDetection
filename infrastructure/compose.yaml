@@ -1,3 +1,4 @@
+name: parking-tttn-dev
 version: '3.8'
 
 services:
@@ -104,13 +105,13 @@ services:
 
   streamlit-admin:
     build: 
-      context: ..
-      dockerfile: backend_microservices/Dockerfile
-    command: ["streamlit", "run", "streamlit_admin/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+      context: ../backend_microservices/streamlit_admin
+      dockerfile: Dockerfile
     ports:
       - "8501:8501"
     environment:
-      - API_URL=http://auth-service:8001/api/v1
+      - AUTH_API_URL=http://auth-service:8001/api/v1
+      - REPORTING_API_URL=http://reporting-service:8004/api/v1
     networks:
       - parking-net
     depends_on:

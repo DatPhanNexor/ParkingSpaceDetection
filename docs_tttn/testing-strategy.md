@@ -1,3 +1,1 @@
-# TESTING STRATEGY
-
-Details will be populated.
+# Testing Strategy\n\n- **Unit Tests**: Pytest (backend).\n- **Integration Tests**: Flutter test.\n- **AI Eval**: Đánh giá YOLOv8 trên tập validation.

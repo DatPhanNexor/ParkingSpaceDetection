@@ -7,12 +7,12 @@ import logging
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    jwt_secret: str = "supersecret123"
-    db_host: str = "127.0.0.1"
-    db_port: int = 3306
-    db_user: str = "root"
-    db_password: str = ""
-    db_name: str = "ai_parking_system"
+    jwt_secret: str
+    db_host: str
+    db_port: int
+    db_user: str
+    db_password: str
+    db_name: str
 
     class Config:
         env_file = ".env"
@@ -32,8 +32,6 @@ from shared.security import (
     create_access_token,
     get_current_user,
     require_role
-)
-
 )
 
 app = FastAPI(title="Authentication Service")

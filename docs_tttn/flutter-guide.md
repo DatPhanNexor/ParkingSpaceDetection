@@ -1,3 +1,1 @@
-# FLUTTER GUIDE
-
-Details will be populated.
+# Flutter Guide\n\nApp sử dụng kiến trúc Riverpod.\nCấu trúc:\n- `lib/models/`: Data models.\n- `lib/repositories/`: Xử lý API.\n- `lib/providers/`: State management.

@@ -1,3 +1,1 @@
-# WEBSOCKET GUIDE
-
-Details will be populated.
+# WebSocket Guide\n\nEndpoint: `ws://host:8004/ws/parking?token=JWT`\nTruyền tín hiệu JSON khi có thay đổi trạng thái bãi đỗ xe.

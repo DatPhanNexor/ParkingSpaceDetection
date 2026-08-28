@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 from typing import Dict, Any
 import logging
 from pydantic import BaseModel
+import datetime
 
 class Settings(BaseSettings):
     rabbitmq_url: str = "amqp://guest:guest@127.0.0.1:5673/"
@@ -29,6 +30,8 @@ import numpy as np
 app = FastAPI(title="AI Detection Service")
 adapter = LegacyAIAdapter()
 active_streams = {}
+video_jobs = {}
+
 
 class DetectionResponse(BaseModel):
     status: str
@@ -69,16 +72,78 @@ async def detect_image(file: UploadFile = File(...)):
     
     return {"status": "success", "detections": mapped_status}
 
+async def process_video_job(job_id: str, file_path: str):
+    video_jobs[job_id] = "running"
+    publisher = await get_publisher()
+    
+    cap = cv2.VideoCapture(file_path)
+    if not cap.isOpened():
+        video_jobs[job_id] = "failed"
+        return
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
+            detected_status = adapter.detect_frame(frame)
+            
+            for slot_raw, slot_data in detected_status.items():
+                slot_code = get_slot_code(slot_raw)
+                if slot_code == "UNMAPPED":
+                    continue
+                    
+                status = SlotStatus.OCCUPIED if slot_data["status"] == "OCCUPIED" else SlotStatus.EMPTY
+                
+                payload = DetectionCompletedPayload(
+                    slot_id=slot_code,
+                    status=status,
+                    confidence=slot_data["confidence"],
+                    measurement_valid=slot_data["measurement_valid"],
+                    board_lock_valid=slot_data["board_lock_valid"],
+                    camera_ok=slot_data["camera_ok"],
+                    status_reason=slot_data["status_reason"],
+                    stable_frame_count=1,
+                    observed_at_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    source_elapsed_seconds=cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0,
+                    source_type="VIDEO"
+                )
+                event = EventEnvelope(
+                    event_type="detection.completed",
+                    source="ai-detection-service",
+                    payload=payload.model_dump()
+                )
+                
+                await publisher.publish(event, routing_key="detection.completed")
+                
+        video_jobs[job_id] = "succeeded"
+    except Exception as e:
+        logger.error(f"Video job {job_id} failed: {e}")
+        video_jobs[job_id] = "failed"
+    finally:
+        cap.release()
+        try:
+            os.remove(file_path)
+        except:
+            pass
+
 @app.post("/api/v1/detections/video")
 async def detect_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    # Stub for video processing. In real system, we'd save the file and process it frame by frame in background.
     job_id = "video-" + os.urandom(4).hex()
+    file_path = f"/tmp/{job_id}_{file.filename}"
+    
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+        
+    video_jobs[job_id] = "queued"
+    background_tasks.add_task(process_video_job, job_id, file_path)
+    
     return DetectionResponse(status="accepted", job_id=job_id, message="Video processing started")
 
 @app.get("/api/v1/detections/jobs/{job_id}")
 async def get_job_status(job_id: str):
-    # Stub for job status
-    return {"job_id": job_id, "status": "processing"}
+    return {"job_id": job_id, "status": video_jobs.get(job_id, "unknown")}
 
 class StreamRequest(BaseModel):
     source_url: str
@@ -103,17 +168,24 @@ async def process_stream(stream_id: str, source_url: str):
             detected_status = adapter.detect_frame(frame)
             
             # Publish detection event
-            for slot_raw, status_raw in detected_status.items():
+            for slot_raw, slot_data in detected_status.items():
                 slot_code = get_slot_code(slot_raw)
                 if slot_code == "UNMAPPED":
                     continue
                     
-                status = SlotStatus.OCCUPIED if status_raw == "OCCUPIED" else SlotStatus.EMPTY
+                status = SlotStatus.OCCUPIED if slot_data["status"] == "OCCUPIED" else SlotStatus.EMPTY
                 
                 payload = DetectionCompletedPayload(
                     slot_id=slot_code,
                     status=status,
-                    confidence=0.9, # stub confidence
+                    confidence=slot_data["confidence"],
+                    measurement_valid=slot_data["measurement_valid"],
+                    board_lock_valid=slot_data["board_lock_valid"],
+                    camera_ok=slot_data["camera_ok"],
+                    status_reason=slot_data["status_reason"],
+                    stable_frame_count=1,
+                    observed_at_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    source_elapsed_seconds=cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0 if cap.isOpened() else 0.0,
                     source_type="WEBCAM"
                 )
                 event = EventEnvelope(
@@ -122,7 +194,7 @@ async def process_stream(stream_id: str, source_url: str):
                     payload=payload.model_dump()
                 )
                 
-                await publisher.publish(event, routing_key=f"detection.{slot_code}")
+                await publisher.publish(event, routing_key="detection.completed")
                 
             await asyncio.sleep(0.5) # Simulate frame processing time
     finally:

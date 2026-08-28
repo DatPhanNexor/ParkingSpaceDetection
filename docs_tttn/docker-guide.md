@@ -1,3 +1,1 @@
-# DOCKER GUIDE
-
-Details will be populated.
+# Docker Guide\n\nSử dụng Docker Compose:\n`docker compose -p parking-tttn-dev -f infrastructure/compose.yaml up -d --build`\n\nBao gồm RabbitMQ, Redis, MySQL.

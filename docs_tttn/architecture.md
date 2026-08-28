@@ -1,3 +1,1 @@
-# ARCHITECTURE
-
-Details will be populated.
+# Architecture\n\nHệ thống Microservices:\n1. Auth Service (Port 8001)\n2. AI Detection Service (Port 8002)\n3. Billing Service (Port 8003)\n4. Reporting Service (Port 8004)\n5. Streamlit Admin (Port 8501)

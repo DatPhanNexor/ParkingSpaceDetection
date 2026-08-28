@@ -1,3 +1,1 @@
-# DATABASE DESIGN
-
-Details will be populated.
+# Database Design\n\nMySQL là nguồn dữ liệu chính:\n- `tai_khoan`: Quản lý người dùng.\n- `parking_slots`: Danh sách slot (S01-S09).\n- `active_session_locks`: Theo dõi trạng thái.\n- `outbox_events`: Outbox Pattern.

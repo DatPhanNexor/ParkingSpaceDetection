@@ -71,7 +71,7 @@ async def get_slots(current_user: dict = Depends(get_current_user)):
         state = await redis_client.hgetall(f"parking:slot:{slot_id}")
         slots.append({
             "slot_id": slot_id,
-            "status": state.get("status", "EMPTY"),
+            "status": state.get("status", "UNKNOWN") if state else "UNKNOWN",
             "session_id": state.get("session_id"),
             "started_at": state.get("started_at")
         })
@@ -82,7 +82,7 @@ async def get_slot(slot_id: str, current_user: dict = Depends(get_current_user))
     state = await redis_client.hgetall(f"parking:slot:{slot_id}")
     return {
         "slot_id": slot_id,
-        "status": state.get("status", "EMPTY"),
+        "status": state.get("status", "UNKNOWN") if state else "UNKNOWN",
         "session_id": state.get("session_id"),
         "started_at": state.get("started_at")
     }

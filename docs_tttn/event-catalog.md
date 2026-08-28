@@ -1,3 +1,1 @@
-# EVENT CATALOG
-
-Details will be populated.
+# Event Catalog\n\nCác sự kiện RabbitMQ:\n- `detection.completed`: Trạng thái AI.\n- `parking.session.started`: Bắt đầu đỗ.\n- `parking.session.completed`: Thanh toán.
