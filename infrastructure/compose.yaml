@@ -1,127 +1,673 @@
+# Smart Parking TTTN - Docker Compose
+# Dat file nay tai: D:\Project\ParkingSpaceDetection\infrastructure\compose.yaml
+# Dat file .env cung thu muc voi compose.yaml.
+# Docker Desktop se gom cac container duoi project "parking-tttn-dev".
+# Khong dat container_name de giu dung co che nhom, DNS va lifecycle cua Compose.
+
 name: parking-tttn-dev
-version: '3.8'
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-backend-environment: &backend-environment
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONPATH: /app/backend_microservices:/app
+  TZ: ${TZ:-Asia/Ho_Chi_Minh}
+
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_USER: ${MYSQL_USER:-admin}
+  DB_PASSWORD: ${MYSQL_PASSWORD:-admin}
+  DB_NAME: ${MYSQL_DATABASE:-ai_parking_system}
+
+  REDIS_URL: redis://:${REDIS_PASSWORD:-admin}@redis:6379/0
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin}@rabbitmq:5672/
+  JWT_SECRET: ${JWT_SECRET:-parking_tttn_dev_only_change_before_production_9f681c8f01dc4e8e8f286ae23f7e8c03}
+
+  # Thu muc ghi cache/runtime cua Ultralytics, Matplotlib va Torch.
+  HOME: /home/appuser
+  MPLCONFIGDIR: /tmp/matplotlib
+  YOLO_CONFIG_DIR: /tmp/ultralytics
+  ULTRALYTICS_CONFIG_DIR: /tmp/ultralytics
+  TORCH_HOME: /tmp/torch
+
+x-backend-build: &backend-build
+  context: ../backend_microservices
+  args:
+    PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    TORCH_VERSION: ${TORCH_VERSION:-2.5.1}
+    TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.20.1}
+    AIO_PIKA_VERSION: ${AIO_PIKA_VERSION:-9.5.6}
+    REDIS_PY_VERSION: ${REDIS_PY_VERSION:-5.2.1}
+    PYJWT_VERSION: ${PYJWT_VERSION:-2.10.1}
+  dockerfile_inline: |
+    # syntax=docker/dockerfile:1.7
+    FROM python:3.11-slim-bookworm AS builder
+
+    ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+    ARG TORCH_VERSION=2.5.1
+    ARG TORCHVISION_VERSION=0.20.1
+    ARG AIO_PIKA_VERSION=9.5.6
+    ARG REDIS_PY_VERSION=5.2.1
+    ARG PYJWT_VERSION=2.10.1
+
+    ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+        PIP_NO_CACHE_DIR=1 \
+        VIRTUAL_ENV=/opt/venv \
+        PATH=/opt/venv/bin:$$PATH
+
+    RUN python -m venv /opt/venv \
+        && python -m pip install --upgrade pip setuptools wheel
+
+    COPY requirements.txt /tmp/requirements.txt
+
+    # Cai Torch CPU rieng de tranh tai CUDA package rat lon tren may demo khong co NVIDIA runtime.
+    # Ghim cac goi nhay cam de source hien tai hoat dong on dinh voi Python 3.11.
+    RUN sed -E '/^(torch|torchvision|aio[_-]pika|redis|ultralytics)[<>=!~]/d' \
+          /tmp/requirements.txt > /tmp/requirements-runtime.txt \
+        && python -m pip install \
+             --index-url "$${PYTORCH_INDEX_URL}" \
+             "torch==$${TORCH_VERSION}" \
+             "torchvision==$${TORCHVISION_VERSION}" \
+        && python -m pip install \
+             -r /tmp/requirements-runtime.txt \
+             "aio-pika==$${AIO_PIKA_VERSION}" \
+             "redis==$${REDIS_PY_VERSION}" \
+             "PyJWT==$${PYJWT_VERSION}" \
+             "ultralytics>=8.0,<9"
+
+    FROM python:3.11-slim-bookworm AS runtime
+
+    ENV DEBIAN_FRONTEND=noninteractive \
+        VIRTUAL_ENV=/opt/venv \
+        PATH=/opt/venv/bin:$$PATH \
+        PYTHONUNBUFFERED=1 \
+        PYTHONDONTWRITEBYTECODE=1 \
+        PYTHONPATH=/app/backend_microservices:/app \
+        HOME=/home/appuser \
+        MPLCONFIGDIR=/tmp/matplotlib \
+        YOLO_CONFIG_DIR=/tmp/ultralytics \
+        ULTRALYTICS_CONFIG_DIR=/tmp/ultralytics \
+        TORCH_HOME=/tmp/torch
+
+    RUN apt-get update \
+        && apt-get install -y --no-install-recommends \
+             ca-certificates \
+             ffmpeg \
+             libgl1 \
+             libglib2.0-0 \
+             libgomp1 \
+        && rm -rf /var/lib/apt/lists/* \
+        && groupadd --gid 10001 appuser \
+        && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser \
+        && mkdir -p \
+             /app/backend_microservices \
+             /app/ParkingVisionV8/models \
+             /app/ParkingSpaceDesktopApp \
+             /tmp/matplotlib \
+             /tmp/ultralytics \
+             /tmp/torch \
+        && chown -R appuser:appuser \
+             /app \
+             /tmp/matplotlib \
+             /tmp/ultralytics \
+             /tmp/torch
+
+    COPY --from=builder /opt/venv /opt/venv
+    COPY --chown=appuser:appuser . /app/backend_microservices
+
+    # Compatibility patch trong image; khong sua source tren may Windows:
+    # - aio-pika 9 tu bat publisher confirms khi tao channel.
+    # - redis-py 5 dung hset(mapping=...) thay hmset.
+    # - Slot chua co cache duoc hien thi EMPTY thay vi UNKNOWN.
+    RUN python - <<'PY'
+    from pathlib import Path
+
+    publisher = Path("/app/backend_microservices/shared/events/publisher.py")
+    text = publisher.read_text(encoding="utf-8")
+    text = text.replace("        await self.channel.declare_confirm_select()\n", "")
+    publisher.write_text(text, encoding="utf-8")
+
+    billing = Path("/app/backend_microservices/services/parking_billing_service/main.py")
+    text = billing.read_text(encoding="utf-8")
+    text = text.replace(
+        "await redis_client.hmset(state_key, {",
+        "await redis_client.hset(state_key, mapping={",
+    )
+    billing.write_text(text, encoding="utf-8")
+
+    reporting = Path("/app/backend_microservices/services/reporting_service/main.py")
+    text = reporting.read_text(encoding="utf-8")
+    text = text.replace(
+        'state.get("status", "UNKNOWN") if state else "UNKNOWN"',
+        'state.get("status", "EMPTY") if state else "EMPTY"',
+    )
+    reporting.write_text(text, encoding="utf-8")
+    PY
+
+    RUN python -m compileall -q /app/backend_microservices
+
+    WORKDIR /app/backend_microservices
+    USER 10001:10001
+
+x-backend-common: &backend-common
+  image: parking-tttn-dev-backend:${APP_IMAGE_TAG:-local}
+  build: *backend-build
+  restart: unless-stopped
+  init: true
+  working_dir: /app/backend_microservices
+  environment: *backend-environment
+  networks:
+    - parking-net
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
+  logging: *default-logging
 
 services:
-  rabbitmq:
-    image: rabbitmq:3-management
+  mysql:
+    image: mysql:${MYSQL_IMAGE_TAG:-8.4.11}
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-connections=200
+      - --sql-mode=STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-admin}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ai_parking_system}
+      MYSQL_USER: ${MYSQL_USER:-admin}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-admin}
     ports:
-      - "15673:15672"
-      - "5673:5672"
+      # Dung 3307 de tranh MySQL/Laragon thuong dung 3306.
+      - "127.0.0.1:${MYSQL_PORT:-3307}:3306"
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - mysql_data:/var/lib/mysql
+      - type: bind
+        source: ../database/ai_parking_system.sql
+        target: /docker-entrypoint-initdb.d/01_ai_parking_system.sql
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../backend_microservices/migrations/001_initial_schema.sql
+        target: /docker-entrypoint-initdb.d/02_microservices_schema.sql
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - MYSQL_PWD="$${MYSQL_ROOT_PASSWORD}" mysqladmin ping -h 127.0.0.1 -uroot --silent
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
     networks:
       - parking-net
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 60s
+    logging: *default-logging
+
+  phpmyadmin:
+    image: phpmyadmin:${PHPMYADMIN_IMAGE_TAG:-5.2.3-apache}
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: "3306"
+      PMA_USER: ${MYSQL_USER:-admin}
+      PMA_PASSWORD: ${MYSQL_PASSWORD:-admin}
+      PMA_ARBITRARY: "0"
+      UPLOAD_LIMIT: 256M
+      MEMORY_LIMIT: 512M
+    ports:
+      # Dung 8081 de tranh Jenkins thuong dung 8080.
+      - "127.0.0.1:${PHPMYADMIN_PORT:-8081}:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - parking-net
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
 
   redis:
-    image: redis:7-alpine
-    command: redis-server --port 6380
+    image: redis:${REDIS_IMAGE_TAG:-7.4.11-alpine}
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-admin}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        exec redis-server \
+          --appendonly yes \
+          --appendfsync everysec \
+          --save 60 1000 \
+          --maxmemory-policy noeviction \
+          --requirepass "$${REDIS_PASSWORD}"
     ports:
-      - "6380:6380"
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping | grep -q PONG
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
     networks:
       - parking-net
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  rabbitmq:
+    image: rabbitmq:${RABBITMQ_IMAGE_TAG:-4.3.5-management}
+    hostname: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-admin}
+      RABBITMQ_DEFAULT_VHOST: /
+      RABBITMQ_NODENAME: rabbit@rabbitmq
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-parking_tttn_dev_cookie_d8c706e7085248759df439e16b9352fc}
+    ports:
+      # Dung 5673/15673 de tranh RabbitMQ khac tai 5672/15672.
+      - "127.0.0.1:${RABBITMQ_PORT:-5673}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15673}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test:
+        - CMD
+        - rabbitmq-diagnostics
+        - -q
+        - ping
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    networks:
+      - parking-net
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 60s
+    logging: *default-logging
 
   auth-service:
-    build: 
-      context: ..
-      dockerfile: backend_microservices/Dockerfile
-    command: ["uvicorn", "services.auth_service.main:app", "--host", "0.0.0.0", "--port", "8001"]
-    ports:
-      - "8001:8001"
+    <<: *backend-common
     environment:
-      - DB_HOST=host.docker.internal
-      - DB_PORT=3306
-      - DB_USER=root
-      - DB_PASSWORD=
-      - DB_NAME=ai_parking_system
-      - JWT_SECRET=supersecret123
-    networks:
-      - parking-net
-    depends_on:
-      - redis
-      - rabbitmq
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      <<: *backend-environment
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      BOOTSTRAP_ADMIN_FULL_NAME: ${BOOTSTRAP_ADMIN_FULL_NAME:-Quan tri vien he thong}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        python - <<'PY'
+        import asyncio
+        import datetime
+        import os
 
-  ai-detection-service:
-    build: 
-      context: ..
-      dockerfile: backend_microservices/Dockerfile
-    command: ["uvicorn", "services.ai_detection_service.main:app", "--host", "0.0.0.0", "--port", "8002"]
+        import aiomysql
+        import redis.asyncio as redis
+
+        from shared.security import get_password_hash
+
+
+        async def bootstrap() -> None:
+            last_error = None
+            connection = None
+            for _ in range(45):
+                try:
+                    connection = await aiomysql.connect(
+                        host=os.environ["DB_HOST"],
+                        port=int(os.environ["DB_PORT"]),
+                        user=os.environ["DB_USER"],
+                        password=os.environ["DB_PASSWORD"],
+                        db=os.environ["DB_NAME"],
+                        charset="utf8mb4",
+                        autocommit=False,
+                    )
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    await asyncio.sleep(2)
+            if connection is None:
+                raise RuntimeError(f"MySQL is not ready: {last_error}")
+
+            username = os.environ["BOOTSTRAP_ADMIN_USERNAME"]
+            password_hash = get_password_hash(os.environ["BOOTSTRAP_ADMIN_PASSWORD"])
+            full_name = os.environ["BOOTSTRAP_ADMIN_FULL_NAME"]
+
+            try:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(
+                        "SELECT id FROM tai_khoan WHERE username = %s LIMIT 1",
+                        (username,),
+                    )
+                    existing = await cursor.fetchone()
+                    if existing is None:
+                        await cursor.execute(
+                            """
+                            INSERT INTO tai_khoan
+                                (username, password_hash, ho_ten, role, is_active)
+                            VALUES (%s, %s, %s, 'admin', 1)
+                            """,
+                            (username, password_hash, full_name),
+                        )
+                        print(f"[bootstrap] Created admin account: {username}", flush=True)
+                    else:
+                        await cursor.execute(
+                            """
+                            UPDATE tai_khoan
+                            SET password_hash = %s,
+                                ho_ten = %s,
+                                role = 'admin',
+                                is_active = 1
+                            WHERE id = %s
+                            """,
+                            (password_hash, full_name, existing[0]),
+                        )
+                        print(f"[bootstrap] Synchronized admin account: {username}", flush=True)
+                await connection.commit()
+            finally:
+                connection.close()
+
+            cache = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+            try:
+                now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                for index in range(1, 10):
+                    slot_id = f"S{index:02d}"
+                    key = f"parking:slot:{slot_id}"
+                    if not await cache.exists(key):
+                        await cache.hset(
+                            key,
+                            mapping={
+                                "status": "EMPTY",
+                                "session_id": "",
+                                "started_at": "",
+                                "updated_at": now,
+                            },
+                        )
+                print("[bootstrap] Redis slots S01-S09 are ready", flush=True)
+            finally:
+                await cache.aclose()
+
+
+        asyncio.run(bootstrap())
+        PY
+        exec uvicorn services.auth_service.main:app \
+          --host 0.0.0.0 \
+          --port 8001 \
+          --workers 1 \
+          --timeout-keep-alive 10
     ports:
-      - "8002:8002"
-    environment:
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-    networks:
-      - parking-net
+      - "${AUTH_PORT:-8001}:8001"
     depends_on:
-      - rabbitmq
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3).read()
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
 
   parking-billing-service:
-    build: 
-      context: ..
-      dockerfile: backend_microservices/Dockerfile
-    command: ["uvicorn", "services.parking_billing_service.main:app", "--host", "0.0.0.0", "--port", "8003"]
+    <<: *backend-common
+    command:
+      - uvicorn
+      - services.parking_billing_service.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8003"
+      - --workers
+      - "1"
+      - --timeout-keep-alive
+      - "10"
     ports:
-      - "8003:8003"
-    environment:
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-      - REDIS_URL=redis://redis:6380/0
-      - DB_HOST=host.docker.internal
-      - DB_PORT=3306
-      - DB_USER=root
-      - DB_PASSWORD=
-      - DB_NAME=ai_parking_system
-    networks:
-      - parking-net
+      - "${PARKING_BILLING_PORT:-8003}:8003"
+    volumes:
+      - type: bind
+        source: ../ParkingSpaceDesktopApp/billing_manager.py
+        target: /app/ParkingSpaceDesktopApp/billing_manager.py
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
-      - rabbitmq
-      - redis
+      auth-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=3).read()
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  ai-detection-service:
+    <<: *backend-common
+    environment:
+      <<: *backend-environment
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-2}
+      OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-2}
+    command:
+      - uvicorn
+      - services.ai_detection_service.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - --workers
+      - "1"
+      - --timeout-keep-alive
+      - "30"
+    ports:
+      - "${AI_DETECTION_PORT:-8002}:8002"
+    volumes:
+      # Model goc ma LegacyAIAdapter dang su dung.
+      - type: bind
+        source: ../yolov8s.pt
+        target: /app/yolov8s.pt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../yolo11n-seg.pt
+        target: /app/yolo11n-seg.pt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../yolo11x-seg.pt
+        target: /app/yolo11x-seg.pt
+        read_only: true
+        bind:
+          create_host_path: false
+
+      # Runtime asset cho Board Lock 9 vi tri S01-S09.
+      - type: bind
+        source: ../ParkingVisionV8/run_droidcam_v8s_boardlock.py
+        target: /app/ParkingVisionV8/run_droidcam_v8s_boardlock.py
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../ParkingVisionV8/parkingvision_board_lock_9zones.json
+        target: /app/ParkingVisionV8/parkingvision_board_lock_9zones.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../ParkingVisionV8/parkingvision_slots_template_9zones.json
+        target: /app/ParkingVisionV8/parkingvision_slots_template_9zones.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../ParkingVisionV8/empty_baseline_9zones.jpg
+        target: /app/ParkingVisionV8/empty_baseline_9zones.jpg
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../ParkingVisionV8/reference_9zones_board.jpg
+        target: /app/ParkingVisionV8/reference_9zones_board.jpg
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../ParkingVisionV8/models/parking_v8s_best.pt
+        target: /app/ParkingVisionV8/models/parking_v8s_best.pt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../ParkingVisionV8/models/parking_v8s_e15_best.pt
+        target: /app/ParkingVisionV8/models/parking_v8s_e15_best.pt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../ParkingVisionV8/models/yolov8s.pt
+        target: /app/ParkingVisionV8/models/yolov8s.pt
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      parking-billing-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - host.docker.internal:host-gateway
+    shm_size: "1gb"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=5).read()
+      interval: 15s
+      timeout: 8s
+      retries: 40
+      # Lan dau nap Torch/YOLO tren CPU co the mat vai phut.
+      start_period: 300s
 
   reporting-service:
-    build: 
-      context: ..
-      dockerfile: backend_microservices/Dockerfile
-    command: ["uvicorn", "services.reporting_service.main:app", "--host", "0.0.0.0", "--port", "8004"]
+    <<: *backend-common
+    command:
+      - uvicorn
+      - services.reporting_service.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8004"
+      - --workers
+      - "1"
+      - --timeout-keep-alive
+      - "30"
     ports:
-      - "8004:8004"
-    environment:
-      - DB_HOST=host.docker.internal
-      - DB_PORT=3306
-      - DB_USER=root
-      - DB_PASSWORD=
-      - DB_NAME=ai_parking_system
-      - REDIS_URL=redis://redis:6380/0
-      - JWT_SECRET=supersecret123
-    networks:
-      - parking-net
+      - "${REPORTING_PORT:-8004}:8004"
     depends_on:
-      - redis
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      auth-service:
+        condition: service_healthy
+      parking-billing-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health', timeout=3).read()
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
 
   streamlit-admin:
-    build: 
+    image: parking-tttn-dev-streamlit-admin:${APP_IMAGE_TAG:-local}
+    build:
       context: ../backend_microservices/streamlit_admin
       dockerfile: Dockerfile
-    ports:
-      - "8501:8501"
+    restart: unless-stopped
+    init: true
     environment:
-      - AUTH_API_URL=http://auth-service:8001/api/v1
-      - REPORTING_API_URL=http://reporting-service:8004/api/v1
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      AUTH_API_URL: http://auth-service:8001/api/v1
+      REPORTING_API_URL: http://reporting-service:8004/api/v1
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+      STREAMLIT_SERVER_HEADLESS: "true"
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      reporting-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3).read()
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
     networks:
       - parking-net
-    depends_on:
-      - auth-service
-      - reporting-service
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging: *default-logging
 
 networks:
   parking-net:
     driver: bridge
+    labels:
+      com.parking.project: parking-tttn-dev
 
 volumes:
-  rabbitmq_data:
+  mysql_data:
+    labels:
+      com.parking.project: parking-tttn-dev
   redis_data:
+    labels:
+      com.parking.project: parking-tttn-dev
+  rabbitmq_data:
+    labels:
+      com.parking.project: parking-tttn-dev
