@@ -1,0 +1,66 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim-bookworm AS builder
+
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG TORCH_VERSION=2.5.1
+ARG TORCHVISION_VERSION=0.20.1
+ARG AIO_PIKA_VERSION=9.5.6
+ARG REDIS_PY_VERSION=5.2.1
+ARG PYJWT_VERSION=2.10.1
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH
+
+RUN python -m venv /opt/venv \
+    && python -m pip install --upgrade pip setuptools wheel
+
+COPY requirements.txt /tmp/requirements.txt
+
+RUN sed -E '/^(torch|torchvision|aio[_-]pika|redis|ultralytics)[<>=!~]/d' \
+      /tmp/requirements.txt > /tmp/requirements-runtime.txt \
+    && python -m pip install \
+         --index-url "${PYTORCH_INDEX_URL}" \
+         "torch==${TORCH_VERSION}" \
+         "torchvision==${TORCHVISION_VERSION}" \
+    && python -m pip install \
+         -r /tmp/requirements-runtime.txt \
+         "aio-pika==${AIO_PIKA_VERSION}" \
+         "redis==${REDIS_PY_VERSION}" \
+         "PyJWT==${PYJWT_VERSION}" \
+         "ultralytics>=8.0,<9"
+
+FROM python:3.11-slim-bookworm AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/backend_microservices:/app \
+    HOME=/home/appuser \
+    MPLCONFIGDIR=/tmp/matplotlib \
+    YOLO_CONFIG_DIR=/tmp/ultralytics \
+    ULTRALYTICS_CONFIG_DIR=/tmp/ultralytics \
+    TORCH_HOME=/tmp/torch
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         ca-certificates ffmpeg libgl1 libglib2.0-0 libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 appuser \
+    && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser \
+    && mkdir -p /app/backend_microservices /app/ParkingVisionV8/models \
+         /app/ParkingSpaceDesktopApp /tmp/matplotlib /tmp/ultralytics /tmp/torch \
+    && chown -R appuser:appuser /app /tmp/matplotlib /tmp/ultralytics /tmp/torch
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=appuser:appuser . /app/backend_microservices
+
+RUN python -m compileall -q /app/backend_microservices
+
+WORKDIR /app/backend_microservices
+USER 10001:10001

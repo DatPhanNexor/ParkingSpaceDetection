@@ -4,20 +4,6 @@ from typing import Optional, List
 import uuid
 import datetime
 import logging
-from pydantic_settings import BaseSettings
-
-class Settings(BaseSettings):
-    jwt_secret: str
-    db_host: str
-    db_port: int
-    db_user: str
-    db_password: str
-    db_name: str
-
-    class Config:
-        env_file = ".env"
-
-settings = Settings()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("auth_service")
@@ -288,4 +274,3 @@ async def update_user_status(user_id: int, is_active: bool, current_user: dict =
 async def update_user_role(user_id: int, role: str, current_user: dict = Depends(require_role("admin"))):
     req = UserUpdateRequest(role=role)
     return await update_user(user_id, req, current_user)
-

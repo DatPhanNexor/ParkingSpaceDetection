@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim-bookworm AS builder
+
+ARG PIP_FIND_LINKS=""
+ARG PIP_NO_INDEX=false
+ARG PIP_TRUSTED_HOST=""
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    PIP_FIND_LINKS=${PIP_FIND_LINKS} \
+    PIP_NO_INDEX=${PIP_NO_INDEX} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH
+
+RUN python -m venv /opt/venv
+
+COPY requirements-core.txt /tmp/requirements-core.txt
+RUN python -m pip install -r /tmp/requirements-core.txt
+
+FROM python:3.11-slim-bookworm AS runtime
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/backend_microservices:/app \
+    HOME=/home/appuser
+
+RUN groupadd --gid 10001 appuser \
+    && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser \
+    && mkdir -p /app/backend_microservices /app/ParkingSpaceDesktopApp \
+    && chown -R appuser:appuser /app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=appuser:appuser . /app/backend_microservices
+
+RUN python -m compileall -q /app/backend_microservices
+
+WORKDIR /app/backend_microservices
+USER 10001:10001

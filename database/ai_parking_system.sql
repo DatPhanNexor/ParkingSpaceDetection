@@ -53,13 +53,9 @@ CREATE TABLE IF NOT EXISTS cau_hinh (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO cau_hinh (id, gia_moi_gio, buoc_lam_tron, phi_toi_thieu, refresh_dashboard_ms)
-VALUES (1, 20000, 5000, 5000, 3000)
-ON DUPLICATE KEY UPDATE
-    gia_moi_gio = VALUES(gia_moi_gio),
-    buoc_lam_tron = VALUES(buoc_lam_tron),
-    phi_toi_thieu = VALUES(phi_toi_thieu),
-    refresh_dashboard_ms = VALUES(refresh_dashboard_ms);
+INSERT IGNORE INTO cau_hinh
+    (id, gia_moi_gio, buoc_lam_tron, phi_toi_thieu, refresh_dashboard_ms)
+VALUES (1, 20000, 5000, 5000, 3000);
 
 CREATE OR REPLACE VIEW vw_dashboard_summary AS
 SELECT 

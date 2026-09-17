@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+baseline_manifest.sha256
+post_manifest.sha256
+evaluation/
+tests/
+streamlit_admin/

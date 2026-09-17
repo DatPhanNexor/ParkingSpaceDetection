@@ -1,13 +1,22 @@
 import pytest
 import datetime
+from passlib.context import CryptContext
 from shared.security import get_password_hash, verify_password, create_access_token, decode_access_token
 
 def test_password_hashing():
-    # Test PBKDF2 compatibility
     pwd = "mypassword123"
     hashed = get_password_hash(pwd)
-    
+
+    assert hashed.startswith("pbkdf2_sha256$210000$")
     assert verify_password(pwd, hashed) is True
+    assert verify_password("wrongpassword", hashed) is False
+
+
+def test_legacy_auth_hashing_remains_supported():
+    legacy_context = CryptContext(schemes=["django_pbkdf2_sha256"])
+    hashed = legacy_context.hash("legacy-password")
+
+    assert verify_password("legacy-password", hashed) is True
     assert verify_password("wrongpassword", hashed) is False
 
 def test_jwt_expiry():

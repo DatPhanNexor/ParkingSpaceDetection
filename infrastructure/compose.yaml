@@ -18,15 +18,15 @@ x-backend-environment: &backend-environment
   PYTHONPATH: /app/backend_microservices:/app
   TZ: ${TZ:-Asia/Ho_Chi_Minh}
 
-  DB_HOST: mysql
-  DB_PORT: "3306"
-  DB_USER: ${MYSQL_USER:-admin}
-  DB_PASSWORD: ${MYSQL_PASSWORD:-admin}
-  DB_NAME: ${MYSQL_DATABASE:-ai_parking_system}
+  DB_HOST: ${AI_PARKING_DB_HOST:-host.docker.internal}
+  DB_PORT: ${AI_PARKING_DB_PORT:-3306}
+  DB_USER: ${AI_PARKING_DB_USER:-root}
+  DB_PASSWORD: ${AI_PARKING_DB_PASSWORD:-}
+  DB_NAME: ${AI_PARKING_DB_NAME:-ai_parking_system}
 
-  REDIS_URL: redis://:${REDIS_PASSWORD:-admin}@redis:6379/0
-  RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-admin}@rabbitmq:5672/
-  JWT_SECRET: ${JWT_SECRET:-parking_tttn_dev_only_change_before_production_9f681c8f01dc4e8e8f286ae23f7e8c03}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in infrastructure/.env}@redis:6379/0
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:?Set RABBITMQ_USER in infrastructure/.env}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in infrastructure/.env}@rabbitmq:5672/
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in infrastructure/.env}
 
   # Thu muc ghi cache/runtime cua Ultralytics, Matplotlib va Torch.
   HOME: /home/appuser
@@ -37,6 +37,17 @@ x-backend-environment: &backend-environment
 
 x-backend-build: &backend-build
   context: ../backend_microservices
+  dockerfile: Dockerfile.core
+  args:
+    PIP_FIND_LINKS: ${PIP_FIND_LINKS:-}
+    PIP_NO_INDEX: ${PIP_NO_INDEX:-false}
+    PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
+  extra_hosts:
+    - host.docker.internal:host-gateway
+
+x-ai-build: &ai-build
+  context: ../backend_microservices
+  dockerfile: Dockerfile.ai
   args:
     PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
     TORCH_VERSION: ${TORCH_VERSION:-2.5.1}
@@ -44,89 +55,9 @@ x-backend-build: &backend-build
     AIO_PIKA_VERSION: ${AIO_PIKA_VERSION:-9.5.6}
     REDIS_PY_VERSION: ${REDIS_PY_VERSION:-5.2.1}
     PYJWT_VERSION: ${PYJWT_VERSION:-2.10.1}
-  dockerfile_inline: |
-    # syntax=docker/dockerfile:1.7
-    FROM python:3.11-slim-bookworm AS builder
-
-    ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-    ARG TORCH_VERSION=2.5.1
-    ARG TORCHVISION_VERSION=0.20.1
-    ARG AIO_PIKA_VERSION=9.5.6
-    ARG REDIS_PY_VERSION=5.2.1
-    ARG PYJWT_VERSION=2.10.1
-
-    ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
-        PIP_NO_CACHE_DIR=1 \
-        VIRTUAL_ENV=/opt/venv \
-        PATH=/opt/venv/bin:$$PATH
-
-    RUN python -m venv /opt/venv \
-        && python -m pip install --upgrade pip setuptools wheel
-
-    COPY requirements.txt /tmp/requirements.txt
-
-    # Cai Torch CPU rieng de tranh tai CUDA package rat lon tren may demo khong co NVIDIA runtime.
-    # Ghim cac goi nhay cam de source hien tai hoat dong on dinh voi Python 3.11.
-    RUN sed -E '/^(torch|torchvision|aio[_-]pika|redis|ultralytics)[<>=!~]/d' \
-          /tmp/requirements.txt > /tmp/requirements-runtime.txt \
-        && python -m pip install \
-             --index-url "$${PYTORCH_INDEX_URL}" \
-             "torch==$${TORCH_VERSION}" \
-             "torchvision==$${TORCHVISION_VERSION}" \
-        && python -m pip install \
-             -r /tmp/requirements-runtime.txt \
-             "aio-pika==$${AIO_PIKA_VERSION}" \
-             "redis==$${REDIS_PY_VERSION}" \
-             "PyJWT==$${PYJWT_VERSION}" \
-             "ultralytics>=8.0,<9"
-
-    FROM python:3.11-slim-bookworm AS runtime
-
-    ENV DEBIAN_FRONTEND=noninteractive \
-        VIRTUAL_ENV=/opt/venv \
-        PATH=/opt/venv/bin:$$PATH \
-        PYTHONUNBUFFERED=1 \
-        PYTHONDONTWRITEBYTECODE=1 \
-        PYTHONPATH=/app/backend_microservices:/app \
-        HOME=/home/appuser \
-        MPLCONFIGDIR=/tmp/matplotlib \
-        YOLO_CONFIG_DIR=/tmp/ultralytics \
-        ULTRALYTICS_CONFIG_DIR=/tmp/ultralytics \
-        TORCH_HOME=/tmp/torch
-
-    RUN apt-get update \
-        && apt-get install -y --no-install-recommends \
-             ca-certificates \
-             ffmpeg \
-             libgl1 \
-             libglib2.0-0 \
-             libgomp1 \
-        && rm -rf /var/lib/apt/lists/* \
-        && groupadd --gid 10001 appuser \
-        && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser \
-        && mkdir -p \
-             /app/backend_microservices \
-             /app/ParkingVisionV8/models \
-             /app/ParkingSpaceDesktopApp \
-             /tmp/matplotlib \
-             /tmp/ultralytics \
-             /tmp/torch \
-        && chown -R appuser:appuser \
-             /app \
-             /tmp/matplotlib \
-             /tmp/ultralytics \
-             /tmp/torch
-
-    COPY --from=builder /opt/venv /opt/venv
-    COPY --chown=appuser:appuser . /app/backend_microservices
-
-    RUN python -m compileall -q /app/backend_microservices
-
-    WORKDIR /app/backend_microservices
-    USER 10001:10001
 
 x-backend-common: &backend-common
-  image: parking-tttn-dev-backend:${APP_IMAGE_TAG:-local}
+  image: parking-tttn-dev-backend-core:${APP_IMAGE_TAG:-local}
   build: *backend-build
   restart: unless-stopped
   init: true
@@ -134,6 +65,8 @@ x-backend-common: &backend-common
   environment: *backend-environment
   networks:
     - parking-net
+  extra_hosts:
+    - host.docker.internal:host-gateway
   security_opt:
     - no-new-privileges:true
   stop_grace_period: 30s
@@ -141,6 +74,8 @@ x-backend-common: &backend-common
 
 services:
   mysql:
+    profiles:
+      - standalone-db
     image: mysql:${MYSQL_IMAGE_TAG:-8.4.11}
     restart: unless-stopped
     command:
@@ -150,10 +85,10 @@ services:
       - --sql-mode=STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-admin}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in infrastructure/.env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-ai_parking_system}
-      MYSQL_USER: ${MYSQL_USER:-admin}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-admin}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in infrastructure/.env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in infrastructure/.env}
     ports:
       # Dung 3307 de tranh MySQL/Laragon thuong dung 3306.
       - "127.0.0.1:${MYSQL_PORT:-3307}:3306"
@@ -186,23 +121,74 @@ services:
     stop_grace_period: 60s
     logging: *default-logging
 
+  database-migrate:
+    image: mysql:${MYSQL_IMAGE_TAG:-8.4.11}
+    restart: "no"
+    environment:
+      DB_HOST: ${AI_PARKING_DB_HOST:-host.docker.internal}
+      DB_PORT: ${AI_PARKING_DB_PORT:-3306}
+      DB_USER: ${AI_PARKING_DB_USER:-root}
+      DB_PASSWORD: ${AI_PARKING_DB_PASSWORD:-}
+      DB_NAME: ${AI_PARKING_DB_NAME:-ai_parking_system}
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        for attempt in $$(seq 1 45); do
+          if MYSQL_PWD="$${DB_PASSWORD}" mysql \
+            --host="$${DB_HOST}" \
+            --port="$${DB_PORT}" \
+            --user="$${DB_USER}" \
+            --database="$${DB_NAME}" \
+            --connect-timeout=3 \
+            --execute="SELECT 1" >/dev/null 2>&1; then
+            break
+          fi
+          if [ "$${attempt}" -eq 45 ]; then
+            echo "Canonical MySQL is not reachable" >&2
+            exit 1
+          fi
+          sleep 2
+        done
+        MYSQL_PWD="$${DB_PASSWORD}" mysql \
+          --host="$${DB_HOST}" \
+          --port="$${DB_PORT}" \
+          --user="$${DB_USER}" \
+          --database="$${DB_NAME}" \
+          < /migrations/001_initial_schema.sql
+        echo "Canonical schema migration completed"
+    volumes:
+      - type: bind
+        source: ../backend_microservices/migrations/001_initial_schema.sql
+        target: /migrations/001_initial_schema.sql
+        read_only: true
+        bind:
+          create_host_path: false
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - parking-net
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
   phpmyadmin:
     image: phpmyadmin:${PHPMYADMIN_IMAGE_TAG:-5.2.3-apache}
     restart: unless-stopped
     environment:
-      PMA_HOST: mysql
-      PMA_PORT: "3306"
-      PMA_USER: ${MYSQL_USER:-admin}
-      PMA_PASSWORD: ${MYSQL_PASSWORD:-admin}
+      PMA_HOST: ${AI_PARKING_DB_HOST:-host.docker.internal}
+      PMA_PORT: ${AI_PARKING_DB_PORT:-3306}
+      PMA_USER: ${AI_PARKING_DB_USER:-root}
+      PMA_PASSWORD: ${AI_PARKING_DB_PASSWORD:-}
       PMA_ARBITRARY: "0"
       UPLOAD_LIMIT: 256M
       MEMORY_LIMIT: 512M
     ports:
       # Dung 8081 de tranh Jenkins thuong dung 8080.
       - "127.0.0.1:${PHPMYADMIN_PORT:-8081}:80"
-    depends_on:
-      mysql:
-        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
     networks:
       - parking-net
     security_opt:
@@ -213,7 +199,7 @@ services:
     image: redis:${REDIS_IMAGE_TAG:-7.4.11-alpine}
     restart: unless-stopped
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-admin}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in infrastructure/.env}
     command:
       - /bin/sh
       - -ec
@@ -248,11 +234,11 @@ services:
     hostname: rabbitmq
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-admin}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in infrastructure/.env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in infrastructure/.env}
       RABBITMQ_DEFAULT_VHOST: /
       RABBITMQ_NODENAME: rabbit@rabbitmq
-      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-parking_tttn_dev_cookie_d8c706e7085248759df439e16b9352fc}
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?Set RABBITMQ_ERLANG_COOKIE in infrastructure/.env}
     ports:
       # Dung 5673/15673 de tranh RabbitMQ khac tai 5672/15672.
       - "127.0.0.1:${RABBITMQ_PORT:-5673}:5672"
@@ -280,106 +266,15 @@ services:
     <<: *backend-common
     environment:
       <<: *backend-environment
-      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin}
-      BOOTSTRAP_ADMIN_FULL_NAME: ${BOOTSTRAP_ADMIN_FULL_NAME:-Quan tri vien he thong}
+      BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-false}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_FULL_NAME: ${BOOTSTRAP_ADMIN_FULL_NAME:-}
     command:
       - /bin/sh
       - -ec
       - |
-        python - <<'PY'
-        import asyncio
-        import datetime
-        import os
-
-        import aiomysql
-        import redis.asyncio as redis
-
-        from shared.security import get_password_hash
-
-
-        async def bootstrap() -> None:
-            last_error = None
-            connection = None
-            for _ in range(45):
-                try:
-                    connection = await aiomysql.connect(
-                        host=os.environ["DB_HOST"],
-                        port=int(os.environ["DB_PORT"]),
-                        user=os.environ["DB_USER"],
-                        password=os.environ["DB_PASSWORD"],
-                        db=os.environ["DB_NAME"],
-                        charset="utf8mb4",
-                        autocommit=False,
-                    )
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    await asyncio.sleep(2)
-            if connection is None:
-                raise RuntimeError(f"MySQL is not ready: {last_error}")
-
-            username = os.environ["BOOTSTRAP_ADMIN_USERNAME"]
-            password_hash = get_password_hash(os.environ["BOOTSTRAP_ADMIN_PASSWORD"])
-            full_name = os.environ["BOOTSTRAP_ADMIN_FULL_NAME"]
-
-            try:
-                async with connection.cursor() as cursor:
-                    await cursor.execute(
-                        "SELECT id FROM tai_khoan WHERE username = %s LIMIT 1",
-                        (username,),
-                    )
-                    existing = await cursor.fetchone()
-                    if existing is None:
-                        await cursor.execute(
-                            """
-                            INSERT INTO tai_khoan
-                                (username, password_hash, ho_ten, role, is_active)
-                            VALUES (%s, %s, %s, 'admin', 1)
-                            """,
-                            (username, password_hash, full_name),
-                        )
-                        print(f"[bootstrap] Created admin account: {username}", flush=True)
-                    else:
-                        await cursor.execute(
-                            """
-                            UPDATE tai_khoan
-                            SET password_hash = %s,
-                                ho_ten = %s,
-                                role = 'admin',
-                                is_active = 1
-                            WHERE id = %s
-                            """,
-                            (password_hash, full_name, existing[0]),
-                        )
-                        print(f"[bootstrap] Synchronized admin account: {username}", flush=True)
-                await connection.commit()
-            finally:
-                connection.close()
-
-            cache = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
-            try:
-                now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                for index in range(1, 10):
-                    slot_id = f"S{index:02d}"
-                    key = f"parking:slot:{slot_id}"
-                    if not await cache.exists(key):
-                        await cache.hset(
-                            key,
-                            mapping={
-                                "status": "EMPTY",
-                                "session_id": "",
-                                "started_at": "",
-                                "updated_at": now,
-                            },
-                        )
-                print("[bootstrap] Redis slots S01-S09 are ready", flush=True)
-            finally:
-                await cache.aclose()
-
-
-        asyncio.run(bootstrap())
-        PY
+        python scripts/bootstrap_runtime.py
         exec uvicorn services.auth_service.main:app \
           --host 0.0.0.0 \
           --port 8001 \
@@ -388,8 +283,8 @@ services:
     ports:
       - "${AUTH_PORT:-8001}:8001"
     depends_on:
-      mysql:
-        condition: service_healthy
+      database-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:
@@ -428,8 +323,8 @@ services:
     depends_on:
       auth-service:
         condition: service_healthy
-      mysql:
-        condition: service_healthy
+      database-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       rabbitmq:
@@ -447,6 +342,8 @@ services:
 
   ai-detection-service:
     <<: *backend-common
+    image: parking-tttn-dev-backend:${APP_IMAGE_TAG:-local}
+    build: *ai-build
     environment:
       <<: *backend-environment
       OMP_NUM_THREADS: ${OMP_NUM_THREADS:-2}
@@ -574,8 +471,8 @@ services:
         condition: service_healthy
       parking-billing-service:
         condition: service_healthy
-      mysql:
-        condition: service_healthy
+      database-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:
@@ -594,19 +491,52 @@ services:
     build:
       context: ../backend_microservices/streamlit_admin
       dockerfile: Dockerfile
+      args:
+        PIP_FIND_LINKS: ${PIP_FIND_LINKS:-}
+        PIP_NO_INDEX: ${PIP_NO_INDEX:-false}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
+      extra_hosts:
+        - host.docker.internal:host-gateway
     restart: unless-stopped
     init: true
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
       AUTH_API_URL: http://auth-service:8001/api/v1
-      REPORTING_API_URL: http://reporting-service:8004/api/v1
+      AI_PARKING_DB_HOST: ${AI_PARKING_DB_HOST:-host.docker.internal}
+      AI_PARKING_DB_PORT: ${AI_PARKING_DB_PORT:-3306}
+      AI_PARKING_DB_USER: ${AI_PARKING_DB_USER:-root}
+      AI_PARKING_DB_PASSWORD: ${AI_PARKING_DB_PASSWORD:-}
+      AI_PARKING_DB_NAME: ${AI_PARKING_DB_NAME:-ai_parking_system}
       STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
       STREAMLIT_SERVER_HEADLESS: "true"
+    command:
+      - streamlit
+      - run
+      - /app/ParkingSpaceDesktopApp/streamlit_dashboard.py
+      - --server.port
+      - "8501"
+      - --server.address
+      - 0.0.0.0
     ports:
       - "${STREAMLIT_PORT:-8501}:8501"
+    volumes:
+      - type: bind
+        source: ../ParkingSpaceDesktopApp/streamlit_dashboard.py
+        target: /app/ParkingSpaceDesktopApp/streamlit_dashboard.py
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../ParkingSpaceDesktopApp/database_manager.py
+        target: /app/ParkingSpaceDesktopApp/canonical_database_manager.py
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       auth-service:
         condition: service_healthy
+      database-migrate:
+        condition: service_completed_successfully
       reporting-service:
         condition: service_healthy
     healthcheck:
@@ -621,6 +551,8 @@ services:
       start_period: 45s
     networks:
       - parking-net
+    extra_hosts:
+      - host.docker.internal:host-gateway
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 30s

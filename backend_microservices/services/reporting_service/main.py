@@ -1,4 +1,3 @@
-import os
 import json
 import asyncio
 from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, HTTPException
@@ -7,21 +6,6 @@ from typing import List, Dict, Any
 import csv
 import io
 import logging
-from pydantic_settings import BaseSettings
-
-class Settings(BaseSettings):
-    db_host: str = "127.0.0.1"
-    db_port: int = 3306
-    db_user: str = "root"
-    db_password: str = ""
-    db_name: str = "ai_parking_system"
-    redis_url: str = "redis://127.0.0.1:6380/0"
-    jwt_secret: str = "supersecret123"
-
-    class Config:
-        env_file = ".env"
-
-settings = Settings()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("reporting_service")

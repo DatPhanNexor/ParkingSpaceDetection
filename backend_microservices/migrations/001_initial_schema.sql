@@ -6,8 +6,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT IGNORE INTO schema_migrations (version) VALUES ('001_initial_schema');
-
 CREATE TABLE IF NOT EXISTS parking_slots (
     slot_id VARCHAR(10) PRIMARY KEY, -- S01 to S09
     label VARCHAR(50),
@@ -70,3 +68,5 @@ CREATE TABLE IF NOT EXISTS service_heartbeats (
     last_heartbeat DATETIME NOT NULL,
     status VARCHAR(50) NOT NULL
 );
+
+INSERT IGNORE INTO schema_migrations (version) VALUES ('001_initial_schema');

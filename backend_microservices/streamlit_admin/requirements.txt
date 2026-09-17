@@ -1,2 +1,5 @@
-streamlit>=1.30.0
-requests>=2.31.0
+streamlit==1.60.0
+requests==2.34.2
+pandas==2.3.2
+plotly==6.3.0
+mysql-connector-python==9.7.0
