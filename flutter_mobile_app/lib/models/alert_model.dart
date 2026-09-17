@@ -1,19 +1,27 @@
+import '../utils/helpers.dart';
+
 class Alert {
   final int id;
   final String level;
   final String source;
   final String message;
-  final String createdAt;
+  final DateTime? createdAt;
 
-  Alert({required this.id, required this.level, required this.source, required this.message, required this.createdAt});
+  const Alert({
+    required this.id,
+    required this.level,
+    required this.source,
+    required this.message,
+    this.createdAt,
+  });
 
   factory Alert.fromJson(Map<String, dynamic> json) {
     return Alert(
-      id: json['id'] ?? 0,
-      level: json['level'] ?? '',
-      source: json['source'] ?? '',
-      message: json['message'] ?? '',
-      createdAt: json['created_at'] ?? '',
+      id: asInt(json['id']),
+      level: (json['level']?.toString() ?? 'info').toUpperCase(),
+      source: json['source']?.toString() ?? 'system',
+      message: json['message']?.toString() ?? '',
+      createdAt: tryParseDate(json['created_at']),
     );
   }
 }

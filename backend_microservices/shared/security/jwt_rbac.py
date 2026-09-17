@@ -1,9 +1,38 @@
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict
-import jwt
-from fastapi import HTTPException, Security, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+try:
+    import jwt
+    _JWT_BACKEND = "pyjwt"
+except ImportError:  # pragma: no cover - exercised only in minimal local test envs
+    from jose import jwt  # type: ignore[no-redef]
+    from jose import exceptions as jose_exceptions
+
+    _JWT_BACKEND = "jose"
+
+try:
+    from fastapi import HTTPException, Security, status
+    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+except ImportError:  # pragma: no cover - keeps pure unit tests importable without FastAPI
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str):
+            self.status_code = status_code
+            self.detail = detail
+            super().__init__(detail)
+
+    class status:
+        HTTP_401_UNAUTHORIZED = 401
+        HTTP_403_FORBIDDEN = 403
+
+    def Security(dependency):
+        return dependency
+
+    class HTTPBearer:
+        pass
+
+    class HTTPAuthorizationCredentials:
+        credentials: str
+
 from passlib.context import CryptContext
 
 # Configuration
@@ -41,10 +70,22 @@ def decode_access_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
-    except jwt.ExpiredSignatureError:
+    except _expired_token_error():
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
-    except jwt.InvalidTokenError:
+    except _invalid_token_error():
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+
+def _expired_token_error():
+    if _JWT_BACKEND == "pyjwt":
+        return jwt.ExpiredSignatureError
+    return jose_exceptions.ExpiredSignatureError
+
+
+def _invalid_token_error():
+    if _JWT_BACKEND == "pyjwt":
+        return jwt.InvalidTokenError
+    return jose_exceptions.JWTError
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)):
     token = credentials.credentials

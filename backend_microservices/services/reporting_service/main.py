@@ -40,16 +40,80 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
+        stale = []
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
             except Exception:
-                pass
+                stale.append(connection)
+        for connection in stale:
+            self.disconnect(connection)
 
 manager = ConnectionManager()
+
+
+async def _build_slots_snapshot() -> List[Dict[str, Any]]:
+    slots = []
+    for i in range(1, 10):
+        slot_id = f"S0{i}"
+        state = await redis_client.hgetall(f"parking:slot:{slot_id}")
+        slots.append({
+            "slot_id": slot_id,
+            "status": state.get("status", "EMPTY") if state else "EMPTY",
+            "session_id": state.get("session_id") if state else None,
+            "started_at": state.get("started_at") if state else None,
+            "updated_at": state.get("updated_at") if state else None,
+        })
+    return slots
+
+
+async def _build_dashboard_snapshot() -> Dict[str, Any]:
+    active_sessions = []
+    summary = {"total_sessions": 0, "active_sessions": 0, "total_revenue": 0}
+    alerts = []
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT slot_id, session_id, started_at FROM active_session_locks")
+            active_rows = await cur.fetchall()
+            active_sessions = [
+                {"slot_id": r[0], "session_id": r[1], "started_at": r[2]}
+                for r in active_rows
+            ]
+
+            await cur.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM lich_su_xe) AS total_sessions,
+                    (SELECT COUNT(*) FROM active_session_locks) AS active_sessions,
+                    (SELECT COALESCE(SUM(thanh_tien), 0) FROM lich_su_xe WHERE gio_ra IS NOT NULL) AS total_revenue
+                """
+            )
+            row = await cur.fetchone()
+            if row:
+                summary = {"total_sessions": row[0], "active_sessions": row[1], "total_revenue": row[2]}
+
+            await cur.execute("SELECT id, level, source, message, created_at FROM system_alerts ORDER BY created_at DESC LIMIT 10")
+            alert_rows = await cur.fetchall()
+            alerts = [
+                {"id": r[0], "level": r[1], "source": r[2], "message": r[3], "created_at": r[4]}
+                for r in alert_rows
+            ]
+
+    return {
+        "type": "parking.snapshot",
+        "slots": await _build_slots_snapshot(),
+        "active_sessions": active_sessions,
+        "summary": summary,
+        "alerts": alerts,
+    }
+
+
+def _json_text(data: Dict[str, Any]) -> str:
+    return json.dumps(data, default=str, ensure_ascii=False)
 
 @app.get("/health")
 def health():
@@ -65,26 +129,19 @@ def metrics():
 
 @app.get("/api/v1/slots")
 async def get_slots(current_user: dict = Depends(get_current_user)):
-    slots = []
-    for i in range(1, 10):
-        slot_id = f"S0{i}"
-        state = await redis_client.hgetall(f"parking:slot:{slot_id}")
-        slots.append({
-            "slot_id": slot_id,
-            "status": state.get("status", "UNKNOWN") if state else "UNKNOWN",
-            "session_id": state.get("session_id"),
-            "started_at": state.get("started_at")
-        })
-    return slots
+    return await _build_slots_snapshot()
 
 @app.get("/api/v1/slots/{slot_id}")
 async def get_slot(slot_id: str, current_user: dict = Depends(get_current_user)):
+    if slot_id not in {f"S0{i}" for i in range(1, 10)}:
+        raise HTTPException(status_code=404, detail="Slot not found")
     state = await redis_client.hgetall(f"parking:slot:{slot_id}")
     return {
         "slot_id": slot_id,
-        "status": state.get("status", "UNKNOWN") if state else "UNKNOWN",
-        "session_id": state.get("session_id"),
-        "started_at": state.get("started_at")
+        "status": state.get("status", "EMPTY") if state else "EMPTY",
+        "session_id": state.get("session_id") if state else None,
+        "started_at": state.get("started_at") if state else None,
+        "updated_at": state.get("updated_at") if state else None,
     }
 
 @app.get("/api/v1/sessions/active")
@@ -107,7 +164,14 @@ async def get_history(current_user: dict = Depends(get_current_user)):
 async def get_summary(current_user: dict = Depends(require_role("admin"))):
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT tong_so_luot, xe_dang_do, tong_doanh_thu FROM vw_dashboard_summary")
+            await cur.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM lich_su_xe) AS total_sessions,
+                    (SELECT COUNT(*) FROM active_session_locks) AS active_sessions,
+                    (SELECT COALESCE(SUM(thanh_tien), 0) FROM lich_su_xe WHERE gio_ra IS NOT NULL) AS total_revenue
+                """
+            )
             row = await cur.fetchone()
             if row:
                 return {"total_sessions": row[0], "active_sessions": row[1], "total_revenue": row[2]}
@@ -163,8 +227,21 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         
     await manager.connect(websocket)
     try:
+        await websocket.send_text(_json_text(await _build_dashboard_snapshot()))
         while True:
-            # Ping/Pong or generic wait
-            data = await websocket.receive_text()
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=3.0)
+                if data:
+                    try:
+                        decoded = json.loads(data)
+                    except json.JSONDecodeError:
+                        decoded = {"type": "text"}
+                    if decoded.get("type") == "client_ping":
+                        await websocket.send_text(_json_text({"type": "server_pong"}))
+            except asyncio.TimeoutError:
+                await websocket.send_text(_json_text(await _build_dashboard_snapshot()))
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as exc:
+        logger.warning("WebSocket connection closed with error: %s", exc)
         manager.disconnect(websocket)

@@ -14,8 +14,6 @@ class EventPublisher:
     async def connect(self):
         self.connection = await aio_pika.connect_robust(RABBITMQ_URL)
         self.channel = await self.connection.channel()
-        # Ensure publisher confirms
-        await self.channel.declare_confirm_select()
         self.exchange = await self.channel.declare_exchange(
             name="parking.events",
             type=aio_pika.ExchangeType.TOPIC,
@@ -25,6 +23,8 @@ class EventPublisher:
     async def publish(self, event: EventEnvelope, routing_key: str):
         if not self.exchange:
             await self.connect()
+        if not self.exchange:
+            raise RuntimeError("RabbitMQ exchange is not available")
             
         message = aio_pika.Message(
             body=json.dumps(event.model_dump()).encode(),

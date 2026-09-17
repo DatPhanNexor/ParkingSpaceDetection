@@ -23,7 +23,6 @@ def test_jwt_expiry():
 
 def test_rbac_dependency():
     from shared.security import require_role
-    from fastapi import HTTPException
     
     dep = require_role("admin")
     
@@ -33,6 +32,6 @@ def test_rbac_dependency():
     
     # Should fail
     staff_user = {"id": 2, "role": "staff"}
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(Exception) as excinfo:
         dep(staff_user)
-    assert excinfo.value.status_code == 403
+    assert getattr(excinfo.value, "status_code") == 403

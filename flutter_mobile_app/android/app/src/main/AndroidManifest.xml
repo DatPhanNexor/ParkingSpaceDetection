@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="smart_parking_app"
+        android:label="Smart Parking AI"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

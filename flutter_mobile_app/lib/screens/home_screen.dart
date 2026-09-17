@@ -1,168 +1,161 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'dart:async';
-import 'package:web_socket_channel/web_socket_channel.dart';
+
 import '../core/constants.dart';
-import '../repositories/auth_repository.dart';
+import '../core/theme.dart';
+import '../models/user_model.dart';
 import '../providers/dashboard_provider.dart';
-import 'login_screen.dart';
-import '../widgets/slot_grid.dart';
-import '../repositories/reporting_repository.dart';
-import '../models/session_model.dart';
-import '../models/history_model.dart';
+import '../repositories/auth_repository.dart';
+import 'alerts_screen.dart';
+import 'dashboard_screen.dart';
+import 'history_screen.dart';
+import 'parking_map_screen.dart';
+import 'report_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  final User user;
+
+  const HomeScreen({super.key, required this.user});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
-  int _selectedIndex = 0;
-  WebSocketChannel? _channel;
-  Timer? _reconnectTimer;
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with WidgetsBindingObserver {
+  int _currentIndex = 0;
+  Timer? _pollTimer;
+  StreamSubscription<Map<String, dynamic>>? _wsSub;
 
   @override
   void initState() {
     super.initState();
-    _connectWebSocket();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startLiveMonitoring();
+    });
   }
 
   @override
   void dispose() {
-    _channel?.sink.close();
-    _reconnectTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _pollTimer?.cancel();
+    unawaited(_wsSub?.cancel());
+    unawaited(ref.read(wsServiceProvider).disconnect(paused: true));
     super.dispose();
   }
 
-  Future<void> _connectWebSocket() async {
-    final token = await ref.read(apiClientProvider).storage.read(key: 'access_token');
-    if (token == null) return;
-
-    final wsUrl = Uri.parse('${AppConstants.wsBaseUrl}?token=$token');
-
-    try {
-      _channel = WebSocketChannel.connect(wsUrl);
-      _channel!.stream.listen(
-        (message) {
-          ref.refresh(slotsProvider);
-          ref.refresh(summaryProvider);
-        },
-        onDone: _scheduleReconnect,
-        onError: (error) => _scheduleReconnect(),
-      );
-    } catch (e) {
-      _scheduleReconnect();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startLiveMonitoring();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _pollTimer?.cancel();
+      unawaited(ref.read(wsServiceProvider).disconnect(paused: true));
     }
   }
 
-  void _scheduleReconnect() {
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 5), _connectWebSocket);
-  }
-
-  void _logout() async {
-    await ref.read(authRepositoryProvider).logout();
+  Future<void> _startLiveMonitoring() async {
     if (!mounted) return;
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+    await _refreshOperationalData();
+    await _connectWebSocket();
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(AppConstants.restSnapshotInterval, (_) {
+      unawaited(_refreshOperationalData(silent: true));
+    });
   }
 
-  Widget _buildActiveSessions() {
-    return FutureBuilder<List<Session>>(
-      future: ref.read(reportingRepositoryProvider).getActiveSessions(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-        if (!snapshot.hasData || snapshot.data!.isEmpty) return const Center(child: Text("No active sessions"));
-
-        return ListView.builder(
-          itemCount: snapshot.data!.length,
-          itemBuilder: (context, index) {
-            final session = snapshot.data![index];
-            return ListTile(
-              title: Text('Slot: ${session.slotId}'),
-              subtitle: Text('Started: ${session.startedAt}'),
-            );
-          },
-        );
-      },
-    );
+  Future<void> _connectWebSocket() async {
+    final token = await ref.read(authRepositoryProvider).getToken();
+    if (!mounted || token == null || token.isEmpty) return;
+    final service = ref.read(wsServiceProvider);
+    await service.connect(token);
+    await _wsSub?.cancel();
+    _wsSub = service.messages.listen((_) {
+      unawaited(_refreshOperationalData(silent: true));
+    });
   }
 
-  Widget _buildHistory() {
-    return FutureBuilder<List<History>>(
-      future: ref.read(reportingRepositoryProvider).getHistory(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-        if (!snapshot.hasData || snapshot.data!.isEmpty) return const Center(child: Text("No history"));
+  Future<void> _refreshOperationalData({bool silent = false}) async {
+    await Future.wait([
+      ref.read(slotsProvider.notifier).fetch(silent: silent),
+      ref.read(activeSessionsProvider.notifier).fetch(silent: silent),
+      ref.read(alertsProvider.notifier).fetch(silent: silent),
+      if (widget.user.isAdmin)
+        ref.read(reportProvider.notifier).fetchAll(silent: silent),
+    ]);
+  }
 
-        return ListView.builder(
-          itemCount: snapshot.data!.length,
-          itemBuilder: (context, index) {
-            final history = snapshot.data![index];
-            return ListTile(
-              title: Text('Slot: ${history.slotId}'),
-              subtitle: Text('Fee: ${history.fee} VND'),
-              trailing: Text(history.endedAt),
-            );
-          },
-        );
-      },
-    );
+  Future<void> _logout() async {
+    _pollTimer?.cancel();
+    await _wsSub?.cancel();
+    await ref.read(wsServiceProvider).disconnect();
+    await ref.read(authStateProvider.notifier).logout();
   }
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> pages = [
-      RefreshIndicator(
-        onRefresh: () async {
-          ref.refresh(slotsProvider);
-          ref.refresh(summaryProvider);
-        },
-        child: Column(
-          children: [
-            Consumer(
-              builder: (context, ref, child) {
-                final summary = ref.watch(summaryProvider);
-                return summary.when(
-                  data: (data) => Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text('Revenue: ${data["total_revenue"]} VND | Active: ${data["active_sessions"]}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  ),
-                  loading: () => const SizedBox.shrink(),
-                  error: (_, __) => const SizedBox.shrink(),
-                );
-              },
-            ),
-            const Expanded(child: SlotGrid()),
-          ],
-        ),
+    final pages = [
+      DashboardScreen(
+        user: widget.user,
+        onLogout: _logout,
+        onRefreshAll: _refreshOperationalData,
       ),
-      _buildActiveSessions(),
-      _buildHistory(),
+      const ParkingMapScreen(),
+      const HistoryScreen(),
+      widget.user.isAdmin
+          ? const ReportScreen(isAdmin: true)
+          : const AlertsScreen(),
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Smart Parking'),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: () {
-            ref.refresh(slotsProvider);
-            ref.refresh(summaryProvider);
-            setState(() {});
-          }),
-          IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
-        ],
-      ),
-      body: pages[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: (index) => setState(() => _selectedIndex = index),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.car_rental), label: 'Active'),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
-        ],
+      backgroundColor: AppTheme.navy,
+      body: IndexedStack(index: _currentIndex, children: pages),
+      bottomNavigationBar: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: AppTheme.navy,
+          border: Border(top: BorderSide(color: AppTheme.border)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: BottomNavigationBar(
+            currentIndex: _currentIndex,
+            onTap: (index) => setState(() => _currentIndex = index),
+            selectedFontSize: 12,
+            unselectedFontSize: 11,
+            items: [
+              const BottomNavigationBarItem(
+                icon: Icon(Icons.dashboard_outlined),
+                activeIcon: Icon(Icons.dashboard),
+                label: 'Tổng quan',
+              ),
+              const BottomNavigationBarItem(
+                icon: Icon(Icons.local_parking_outlined),
+                activeIcon: Icon(Icons.local_parking),
+                label: 'Đang đỗ',
+              ),
+              const BottomNavigationBarItem(
+                icon: Icon(Icons.history_outlined),
+                activeIcon: Icon(Icons.history),
+                label: 'Lịch sử',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(
+                  widget.user.isAdmin
+                      ? Icons.bar_chart_outlined
+                      : Icons.notifications_outlined,
+                ),
+                activeIcon: Icon(
+                  widget.user.isAdmin ? Icons.bar_chart : Icons.notifications,
+                ),
+                label: widget.user.isAdmin ? 'Báo cáo' : 'Cảnh báo',
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

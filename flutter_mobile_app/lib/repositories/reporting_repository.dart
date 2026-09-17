@@ -1,41 +1,65 @@
-import '../services/api_client.dart';
-import '../core/constants.dart';
-import '../models/slot_model.dart';
-import '../models/session_model.dart';
-import '../models/history_model.dart';
-import '../models/alert_model.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../core/constants.dart';
+import '../models/alert_model.dart';
+import '../services/api_client.dart';
 import 'auth_repository.dart';
 
-final reportingRepositoryProvider = Provider((ref) => ReportingRepository(ref.read(apiClientProvider)));
+final reportingRepositoryProvider = Provider<ReportingRepository>((ref) {
+  return ReportingRepository(ref.read(apiClientProvider));
+});
 
 class ReportingRepository {
-  final ApiClient _apiClient;
+  final ApiClient _client;
 
-  ReportingRepository(this._apiClient);
+  ReportingRepository(this._client);
 
-  Future<List<Slot>> getSlots() async {
-    final response = await _apiClient.dio.get('${AppConstants.reportingBaseUrl}/slots');
-    return (response.data as List).map((e) => Slot.fromJson(e)).toList();
+  Future<Map<String, dynamic>> getSummary() async {
+    try {
+      final response = await _client.dio.get<Map<String, dynamic>>(
+        AppConstants.reportSummaryUrl,
+      );
+      return response.data ?? <String, dynamic>{};
+    } on DioException catch (error) {
+      throw ApiFailure.fromDio(error);
+    }
   }
 
-  Future<List<Session>> getActiveSessions() async {
-    final response = await _apiClient.dio.get('${AppConstants.reportingBaseUrl}/sessions/active');
-    return (response.data as List).map((e) => Session.fromJson(e)).toList();
+  Future<List<Map<String, dynamic>>> getRevenue() async {
+    return _getMapList(AppConstants.reportRevenueUrl);
   }
 
-  Future<List<History>> getHistory() async {
-    final response = await _apiClient.dio.get('${AppConstants.reportingBaseUrl}/sessions/history');
-    return (response.data as List).map((e) => History.fromJson(e)).toList();
+  Future<List<Map<String, dynamic>>> getFrequency() async {
+    return _getMapList(AppConstants.reportFrequencyUrl);
   }
 
   Future<List<Alert>> getAlerts() async {
-    final response = await _apiClient.dio.get('${AppConstants.reportingBaseUrl}/alerts');
-    return (response.data as List).map((e) => Alert.fromJson(e)).toList();
+    try {
+      final response = await _client.dio.get<dynamic>(AppConstants.alertsUrl);
+      final data = response.data;
+      if (data is List<dynamic>) {
+        return data
+            .whereType<Map<String, dynamic>>()
+            .map(Alert.fromJson)
+            .toList();
+      }
+      return const <Alert>[];
+    } on DioException catch (error) {
+      throw ApiFailure.fromDio(error);
+    }
   }
 
-  Future<Map<String, dynamic>> getSummary() async {
-    final response = await _apiClient.dio.get('${AppConstants.reportingBaseUrl}/reports/summary');
-    return response.data;
+  Future<List<Map<String, dynamic>>> _getMapList(String url) async {
+    try {
+      final response = await _client.dio.get<dynamic>(url);
+      final data = response.data;
+      if (data is List<dynamic>) {
+        return data.whereType<Map<String, dynamic>>().toList();
+      }
+      return const <Map<String, dynamic>>[];
+    } on DioException catch (error) {
+      throw ApiFailure.fromDio(error);
+    }
   }
 }

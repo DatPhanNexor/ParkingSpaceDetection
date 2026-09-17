@@ -120,35 +120,6 @@ x-backend-build: &backend-build
     COPY --from=builder /opt/venv /opt/venv
     COPY --chown=appuser:appuser . /app/backend_microservices
 
-    # Compatibility patch trong image; khong sua source tren may Windows:
-    # - aio-pika 9 tu bat publisher confirms khi tao channel.
-    # - redis-py 5 dung hset(mapping=...) thay hmset.
-    # - Slot chua co cache duoc hien thi EMPTY thay vi UNKNOWN.
-    RUN python - <<'PY'
-    from pathlib import Path
-
-    publisher = Path("/app/backend_microservices/shared/events/publisher.py")
-    text = publisher.read_text(encoding="utf-8")
-    text = text.replace("        await self.channel.declare_confirm_select()\n", "")
-    publisher.write_text(text, encoding="utf-8")
-
-    billing = Path("/app/backend_microservices/services/parking_billing_service/main.py")
-    text = billing.read_text(encoding="utf-8")
-    text = text.replace(
-        "await redis_client.hmset(state_key, {",
-        "await redis_client.hset(state_key, mapping={",
-    )
-    billing.write_text(text, encoding="utf-8")
-
-    reporting = Path("/app/backend_microservices/services/reporting_service/main.py")
-    text = reporting.read_text(encoding="utf-8")
-    text = text.replace(
-        'state.get("status", "UNKNOWN") if state else "UNKNOWN"',
-        'state.get("status", "EMPTY") if state else "EMPTY"',
-    )
-    reporting.write_text(text, encoding="utf-8")
-    PY
-
     RUN python -m compileall -q /app/backend_microservices
 
     WORKDIR /app/backend_microservices

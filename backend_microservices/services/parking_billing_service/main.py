@@ -4,7 +4,10 @@ import asyncio
 import uuid
 import datetime
 import logging
-from fastapi import FastAPI, BackgroundTasks
+from contextlib import asynccontextmanager, suppress
+from typing import Optional
+
+from fastapi import FastAPI
 from pydantic_settings import BaseSettings
 import aio_pika
 
@@ -19,148 +22,227 @@ settings = Settings()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("parking_billing")
-from contextlib import asynccontextmanager
 
 from shared.events import (
     EventEnvelope, DetectionCompletedPayload, SlotStatus, get_publisher
 )
 from shared.database import get_db_connection, get_db_transaction, redis_client, acquire_lock
-
-from shared.database import get_db_connection, get_db_transaction, redis_client, acquire_lock
 from adapters.legacy_billing_adapter import calculate_fee, BillingConfig
+
+
+def _utc_now_naive() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def _parse_event_time(value: Optional[str]) -> datetime.datetime:
+    if not value:
+        return _utc_now_naive()
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        return parsed
+    except ValueError:
+        logger.warning("Invalid event timestamp received; using server time")
+        return _utc_now_naive()
+
+
+async def _mark_processed(cur, event: EventEnvelope) -> None:
+    await cur.execute(
+        "INSERT IGNORE INTO processed_events (event_id, event_type) VALUES (%s, %s)",
+        (event.event_id, event.event_type),
+    )
+
+
+async def _insert_outbox(cur, event_type: str, payload: dict) -> None:
+    await cur.execute(
+        "INSERT INTO outbox_events (event_type, payload) VALUES (%s, %s)",
+        (event_type, json.dumps(payload, default=str)),
+    )
+
 
 async def process_detection_event(event: EventEnvelope):
     payload = DetectionCompletedPayload(**event.payload)
     slot_id = payload.slot_id
     status = payload.status.value
     event_id = event.event_id
-    
-    # Extract explicitly requested parameters
-    observed_at_utc = event.occurred_at
-    source_elapsed_seconds = payload.source_elapsed_seconds if hasattr(payload, 'source_elapsed_seconds') else 0
-    
+
     logger.info(f"Processing event {event_id} for slot {slot_id} with status {status}")
-    
-    # 1. Idempotency Check in MySQL
-    async with get_db_transaction() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("SELECT event_id FROM processed_events WHERE event_id = %s", (event_id,))
-            if await cur.fetchone():
-                return # Already processed
-                
-            await cur.execute(
-                "INSERT INTO processed_events (event_id, event_type) VALUES (%s, %s)",
-                (event_id, event.event_type)
-            )
-            
-    # 2. Redis Distributed Lock for the slot
+
+    if slot_id not in {f"S0{i}" for i in range(1, 10)}:
+        logger.warning("Ignoring detection event %s for invalid slot %s", event_id, slot_id)
+        return
+
     lock_key = f"parking:lock:{slot_id}"
     async with acquire_lock(lock_key, timeout=5) as acquired:
         if not acquired:
-            # Requeue or let it timeout/retry in RMQ DLQ
-            raise Exception(f"Could not acquire lock for {slot_id}")
-            
-        # 3. Check current state in Redis
+            raise RuntimeError(f"Could not acquire lock for {slot_id}")
+
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT event_id FROM processed_events WHERE event_id = %s", (event_id,))
+                if await cur.fetchone():
+                    return
+
+        if (
+            not payload.measurement_valid
+            or not payload.board_lock_valid
+            or not payload.camera_ok
+            or status not in {SlotStatus.EMPTY.value, SlotStatus.OCCUPIED.value}
+        ):
+            logger.info("Ignoring invalid measurement event %s for %s: %s", event_id, slot_id, payload.status_reason)
+            async with get_db_transaction() as conn:
+                async with conn.cursor() as cur:
+                    await _mark_processed(cur, event)
+            return
+
         state_key = f"parking:slot:{slot_id}"
         current_state = await redis_client.hgetall(state_key)
-        
         current_status = current_state.get("status", "EMPTY")
         current_session = current_state.get("session_id")
-        
-        # 4. Handle State Transition
+
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT session_id, started_at FROM active_session_locks WHERE slot_id = %s",
+                    (slot_id,),
+                )
+                active_row = await cur.fetchone()
+
+        if active_row and current_status != "OCCUPIED":
+            current_status = "OCCUPIED"
+            current_session = active_row[0]
+            await redis_client.hset(
+                state_key,
+                mapping={
+                    "status": "OCCUPIED",
+                    "session_id": active_row[0],
+                    "started_at": active_row[1].isoformat() if active_row[1] else "",
+                    "updated_at": _utc_now_naive().isoformat(),
+                },
+            )
+
         if status == "OCCUPIED" and current_status == "EMPTY":
-            # New Session
             session_id = str(uuid.uuid4())
-            started_at = datetime.datetime.utcnow().isoformat()
-            
-            # Update Redis
-            await redis_client.hmset(state_key, {
-                "status": "OCCUPIED",
-                "session_id": session_id,
-                "started_at": started_at
-            })
-            
-            # Persist to MySQL and Outbox in transaction
+            started_at_dt = _parse_event_time(payload.observed_at_utc or event.occurred_at)
+            started_at = started_at_dt.isoformat()
+
+            await redis_client.hset(
+                state_key,
+                mapping={
+                    "status": "OCCUPIED",
+                    "session_id": session_id,
+                    "started_at": started_at,
+                    "updated_at": started_at,
+                },
+            )
+
             async with get_db_transaction() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(
-                        "INSERT INTO active_session_locks (slot_id, session_id) VALUES (%s, %s) ON DUPLICATE KEY UPDATE session_id=VALUES(session_id)",
-                        (slot_id, session_id)
+                        """
+                        INSERT INTO active_session_locks (slot_id, session_id, started_at, locked_by_service)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (slot_id, session_id, started_at_dt, "parking-billing-service"),
                     )
-                    
-                    # Outbox event for session.started
-                    outbox_payload = {
+                    slot_payload = {
+                        "slot_id": slot_id,
+                        "status": "OCCUPIED",
+                        "updated_at": started_at,
+                    }
+                    session_payload = {
                         "session_id": session_id,
                         "slot_id": slot_id,
-                        "started_at": started_at
+                        "started_at": started_at,
                     }
-                    await cur.execute(
-                        "INSERT INTO outbox_events (event_type, payload) VALUES (%s, %s)",
-                        ("parking.session.started", json.dumps(outbox_payload))
-                    )
-                    
+                    await _insert_outbox(cur, "parking.slot.updated", slot_payload)
+                    await _insert_outbox(cur, "parking.session.started", session_payload)
+                    await _mark_processed(cur, event)
+
         elif status == "EMPTY" and current_status == "OCCUPIED" and current_session:
-            # End Session
-            ended_at_dt = datetime.datetime.utcnow()
+            ended_at_dt = _parse_event_time(payload.observed_at_utc or event.occurred_at)
             ended_at = ended_at_dt.isoformat()
             started_at_str = current_state.get("started_at")
-            started_at_dt = datetime.datetime.fromisoformat(started_at_str)
-            
-            duration_seconds = int((ended_at_dt - started_at_dt).total_seconds())
-            
-            # Read pricing from DB
+            if active_row and active_row[1]:
+                started_at_dt = active_row[1]
+            else:
+                started_at_dt = _parse_event_time(started_at_str)
+
+            duration_seconds = max(0, int((ended_at_dt - started_at_dt).total_seconds()))
+
             async with get_db_connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute("SELECT gia_moi_gio, buoc_lam_tron, phi_toi_thieu FROM cau_hinh LIMIT 1")
                     config = await cur.fetchone()
                     if not config:
-                        config = (20000, 5000, 5000) # Default
-            
+                        config = (20000, 5000, 5000)
+
             gia_moi_gio, buoc_lam_tron, phi_toi_thieu = config
-            
             billing_config = BillingConfig(
                 hourly_rate_vnd=gia_moi_gio,
                 rounding_vnd=buoc_lam_tron,
-                minimum_fee_vnd=phi_toi_thieu
+                minimum_fee_vnd=phi_toi_thieu,
             )
             fee = calculate_fee(duration_seconds, billing_config)
-            
-            # Update Redis
-            await redis_client.hmset(state_key, {
-                "status": "EMPTY",
-                "session_id": "",
-                "started_at": ""
-            })
-            
-            # Persist to MySQL
+
+            await redis_client.hset(
+                state_key,
+                mapping={
+                    "status": "EMPTY",
+                    "session_id": "",
+                    "started_at": "",
+                    "updated_at": ended_at,
+                },
+            )
+
             async with get_db_transaction() as conn:
                 async with conn.cursor() as cur:
-                    # Remove lock
                     await cur.execute("DELETE FROM active_session_locks WHERE slot_id = %s", (slot_id,))
-                    
-                    # Insert history
                     await cur.execute(
                         """
                         INSERT INTO lich_su_xe 
                         (transaction_id, input_mode, slot_id, gio_vao, gio_ra, so_giay, gia_moi_gio, buoc_lam_tron, thanh_tien)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
-                        (current_session, "WEBCAM", slot_id, started_at_dt, ended_at_dt, duration_seconds, gia_moi_gio, buoc_lam_tron, fee)
+                        (
+                            current_session,
+                            payload.source_type,
+                            slot_id,
+                            started_at_dt,
+                            ended_at_dt,
+                            duration_seconds,
+                            gia_moi_gio,
+                            buoc_lam_tron,
+                            fee,
+                        ),
                     )
-                    
-                    # Outbox event
-                    outbox_payload = {
+                    slot_payload = {
+                        "slot_id": slot_id,
+                        "status": "EMPTY",
+                        "updated_at": ended_at,
+                    }
+                    session_payload = {
                         "session_id": current_session,
                         "slot_id": slot_id,
                         "started_at": started_at_str,
                         "ended_at": ended_at,
                         "duration_seconds": duration_seconds,
-                        "amount": fee
                     }
-                    await cur.execute(
-                        "INSERT INTO outbox_events (event_type, payload) VALUES (%s, %s)",
-                        ("parking.session.completed", json.dumps(outbox_payload))
-                    )
+                    billing_payload = {
+                        **session_payload,
+                        "amount": fee,
+                        "currency": "VND",
+                        "calculated_at": ended_at,
+                    }
+                    await _insert_outbox(cur, "parking.slot.updated", slot_payload)
+                    await _insert_outbox(cur, "parking.session.completed", session_payload)
+                    await _insert_outbox(cur, "billing.completed", billing_payload)
+                    await _mark_processed(cur, event)
+        else:
+            async with get_db_transaction() as conn:
+                async with conn.cursor() as cur:
+                    await _mark_processed(cur, event)
 
 async def outbox_poller():
     publisher = await get_publisher()
@@ -225,16 +307,15 @@ async def consume_events():
         
         async with queue.iterator() as queue_iter:
             async for message in queue_iter:
-                async with message.process(ignore_processed=True):
-                    try:
-                        body = json.loads(message.body.decode())
-                        envelope = EventEnvelope(**body)
-                        await process_detection_event(envelope)
-                        await message.ack()
-                    except Exception as e:
-                        print(f"Error processing message: {e}")
-                        # Reject without requeue sends to DLX
-                        await message.reject(requeue=False)
+                try:
+                    body = json.loads(message.body.decode())
+                    envelope = EventEnvelope(**body)
+                    await process_detection_event(envelope)
+                    await message.ack()
+                except Exception as e:
+                    logger.exception("Error processing RabbitMQ message: %s", e)
+                    # Reject without requeue sends the failed message to the DLQ configured above.
+                    await message.reject(requeue=False)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -245,17 +326,28 @@ async def lifespan(app: FastAPI):
             rows = await cur.fetchall()
             for row in rows:
                 state_key = f"parking:slot:{row[0]}"
-                await redis_client.hmset(state_key, {
-                    "status": "OCCUPIED",
-                    "session_id": row[1],
-                    "started_at": row[2].isoformat() if row[2] else ""
-                })
+                started_at = row[2].isoformat() if row[2] else ""
+                await redis_client.hset(
+                    state_key,
+                    mapping={
+                        "status": "OCCUPIED",
+                        "session_id": row[1],
+                        "started_at": started_at,
+                        "updated_at": started_at,
+                    },
+                )
                 
     task = asyncio.create_task(consume_events())
     outbox_task = asyncio.create_task(outbox_poller())
-    yield
-    task.cancel()
-    outbox_task.cancel()
+    try:
+        yield
+    finally:
+        task.cancel()
+        outbox_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        with suppress(asyncio.CancelledError):
+            await outbox_task
     
 app = FastAPI(title="Parking and Billing Service", lifespan=lifespan)
 
@@ -270,4 +362,3 @@ def ready():
 @app.get("/metrics")
 def metrics():
     return {"events_processed": 0} # Stub
-

@@ -1,5 +1,7 @@
 import os
 import asyncio
+import tempfile
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
 from pydantic_settings import BaseSettings
 from typing import Dict, Any
@@ -125,13 +127,14 @@ async def process_video_job(job_id: str, file_path: str):
         cap.release()
         try:
             os.remove(file_path)
-        except:
-            pass
+        except OSError as exc:
+            logger.warning("Could not remove temporary video file %s: %s", file_path, exc)
 
 @app.post("/api/v1/detections/video")
 async def detect_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     job_id = "video-" + os.urandom(4).hex()
-    file_path = f"/tmp/{job_id}_{file.filename}"
+    safe_name = Path(file.filename or "upload.mp4").name
+    file_path = str(Path(tempfile.gettempdir()) / f"{job_id}_{safe_name}")
     
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
@@ -156,7 +159,7 @@ async def process_stream(stream_id: str, source_url: str):
     
     cap = cv2.VideoCapture(source_url)
     if not cap.isOpened():
-        print(f"Failed to open stream: {source_url}")
+        logger.warning("Failed to open stream: %s", source_url)
         return
 
     try:

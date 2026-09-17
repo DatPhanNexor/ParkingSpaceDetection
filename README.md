@@ -45,9 +45,8 @@ Hệ thống sử dụng các mô hình **YOLO kết hợp OpenCV** để xử l
 - [33. Troubleshooting](#34-troubleshooting)
 - [34. Quy trình Demo](#35-quy-trình-demo)
 - [35. Phạm vi mở rộng](#36-phạm-vi-mở-rộng)
-- [36. Lưu ý khi nộp Course / GitHub](#37-lưu-ý-khi-nộp-course--github)
-- [37. Quick Start](#38-quick-start)
-- [38. License](#39-license)
+- [36. Quick Start](#37-quick-start)
+- [37. License](#38-license)
 
 ---
 
@@ -1629,41 +1628,7 @@ Core flow phải ổn định trước khi phát triển các tính năng mở r
 
 ---
 
-# 37. Lưu ý khi nộp Course / GitHub
-
-Do giới hạn dung lượng bản nộp, các model/dataset/video lớn có thể không nằm trong repository.
-
-Người kiểm tra cần:
-
-1. clone source;
-2. tải Large Assets;
-3. đặt đúng cấu trúc;
-4. cài Python dependencies;
-5. import database;
-6. khởi động service cần thiết;
-7. chạy ứng dụng.
-
-Không đổi tên model hoặc folder nếu mã nguồn đang tham chiếu trực tiếp.
-
-Các thư mục phát sinh không nên commit:
-
-```text
-.venv/
-__pycache__/
-.pytest_cache/
-build/
-.dart_tool/
-.gradle/
-.idea/
-.vscode/
-ParkingSpaceDesktopApp/desktop_outputs/
-```
-
-Điều chỉnh `.gitignore` theo nhu cầu repository.
-
----
-
-# 38. Quick Start
+# 37. Quick Start
 
 ## Python
 
@@ -1719,7 +1684,7 @@ flutter build apk --debug
 
 ---
 
-# 39. License
+# 38. License
 
 Dự án được phân phối theo **Apache License 2.0**.
 

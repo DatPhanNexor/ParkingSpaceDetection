@@ -1,5 +1,5 @@
 ﻿name: smart_parking_app
-description: "A new Flutter project."
+description: "Flutter mobile command center for the AI Smart Parking system."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -61,6 +61,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - branding/parking_logo_3d.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
