@@ -551,7 +551,7 @@ jobs:
           required_services=(
             "ai-detection-service"
             "auth-service"
-            "mysql"
+            "database-migrate"
             "parking-billing-service"
             "phpmyadmin"
             "rabbitmq"
