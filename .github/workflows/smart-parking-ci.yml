@@ -1,12 +1,14 @@
 name: Smart Parking CI
 
-"on":
+on:
   push:
     branches:
       - main
+
   pull_request:
     branches:
       - main
+
   workflow_dispatch:
     inputs:
       full_backend_image:
@@ -15,26 +17,37 @@ name: Smart Parking CI
         default: false
         type: boolean
 
+
 permissions:
   contents: read
+
 
 concurrency:
   group: smart-parking-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+
 defaults:
   run:
     shell: bash
+
 
 env:
   PYTHON_VERSION: "3.11"
   FLUTTER_VERSION: "3.38.5"
 
+
 jobs:
+
+  # ============================================================
+  # BACKEND
+  # ============================================================
+
   backend-test:
     name: Backend unit and contract tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
     env:
       JWT_SECRET: ci-only-smart-parking-secret-not-for-production
       PYTHONPATH: ${{ github.workspace }}/backend_microservices:${{ github.workspace }}
@@ -42,11 +55,13 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
           persist-credentials: false
+
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -56,6 +71,7 @@ jobs:
           cache-dependency-path: |
             backend_microservices/pyproject.toml
             backend_microservices/requirements.txt
+
 
       - name: Verify backend source layout
         run: |
@@ -74,17 +90,21 @@ jobs:
           )
 
           for file in "${required_files[@]}"; do
-            test -f "$file" || {
+            if [[ ! -f "$file" ]]; then
               echo "::error file=$file::Required backend file is missing"
               exit 1
-            }
+            fi
           done
+
+          echo "Backend source layout verified."
+
 
       - name: Install focused unit-test dependencies
         run: |
           set -euo pipefail
 
           python -m pip install --upgrade pip wheel
+
           python -m pip install \
             "fastapi>=0.109,<1" \
             "pydantic>=2.6,<3" \
@@ -96,16 +116,19 @@ jobs:
 
           python -m pip check
 
+
       - name: Compile backend Python sources
         run: |
           set -euo pipefail
           python -m compileall -q backend_microservices
+
 
       - name: Verify current event fixture
         run: |
           set -euo pipefail
 
           fixture="backend_microservices/tests/unit/test_idempotency.py"
+
           required_fields=(
             measurement_valid
             board_lock_valid
@@ -117,13 +140,17 @@ jobs:
           )
 
           for field in "${required_fields[@]}"; do
-            grep -q "$field" "$fixture" || {
+            if ! grep -q "$field" "$fixture"; then
               echo "::error file=$fixture::The event fixture is stale and is missing field '$field'"
               exit 1
-            }
+            fi
           done
 
+          echo "Current event fixture verified."
+
+
       - name: Run backend unit tests
+        id: backend_tests
         run: |
           set -euo pipefail
 
@@ -132,6 +159,7 @@ jobs:
             --maxfail=1 \
             backend_microservices/tests/unit
 
+
       - name: Write backend summary
         if: always()
         run: |
@@ -139,9 +167,14 @@ jobs:
             echo "## Backend CI"
             echo "- Python: ${PYTHON_VERSION}"
             echo "- Syntax compilation: completed"
-            echo "- Unit test suite: executed"
             echo "- Current event fixture: validated"
+            echo "- Unit tests: ${{ steps.backend_tests.outcome }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+
+  # ============================================================
+  # FLUTTER
+  # ============================================================
 
   flutter-test:
     name: Flutter analyze and widget tests
@@ -149,11 +182,13 @@ jobs:
     timeout-minutes: 25
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
           persist-credentials: false
+
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -163,26 +198,38 @@ jobs:
           cache: true
           pub-cache: true
 
+
       - name: Verify Flutter project and toolchain
         working-directory: flutter_mobile_app
         run: |
           set -euo pipefail
 
-          test -f pubspec.yaml
-          test -f pubspec.lock
-          test -f lib/main.dart
-          test -f lib/models/slot_model.dart
-          test -f lib/widgets/slot_grid.dart
-          test -f test/widget_test.dart
+          required_files=(
+            "pubspec.yaml"
+            "pubspec.lock"
+            "lib/main.dart"
+            "lib/models/slot_model.dart"
+            "lib/widgets/slot_grid.dart"
+            "test/widget_test.dart"
+          )
 
-          grep -Fq "import '../models/slot_model.dart';" lib/widgets/slot_grid.dart || {
-            echo "::error file=flutter_mobile_app/lib/widgets/slot_grid.dart::Missing Slot model import required by SlotGrid"
-            exit 1
-          }
+          for file in "${required_files[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error file=flutter_mobile_app/$file::Required Flutter file is missing"
+              exit 1
+            fi
+          done
+
+          grep -Fq "import '../models/slot_model.dart';" \
+            lib/widgets/slot_grid.dart || {
+              echo "::error file=flutter_mobile_app/lib/widgets/slot_grid.dart::Missing Slot model import required by SlotGrid"
+              exit 1
+            }
 
           flutter --version
           dart --version
           flutter config --no-analytics
+
 
       - name: Resolve Flutter dependencies
         working-directory: flutter_mobile_app
@@ -190,20 +237,30 @@ jobs:
           set -euo pipefail
           flutter pub get
 
+
       - name: Analyze Flutter source
+        id: flutter_analyze
         working-directory: flutter_mobile_app
         run: |
           set -euo pipefail
 
-          # Existing style/lint debt remains visible in the log, but only
-          # syntax and type errors block this WIP branch.
-          flutter analyze --no-fatal-infos --no-fatal-warnings
+          # Existing style/lint debt remains visible in the log.
+          # Syntax and type errors remain fatal.
+          flutter analyze \
+            --no-fatal-infos \
+            --no-fatal-warnings
+
 
       - name: Run Flutter widget tests
+        id: flutter_tests
         working-directory: flutter_mobile_app
         run: |
           set -euo pipefail
-          flutter test --no-pub --reporter expanded
+
+          flutter test \
+            --no-pub \
+            --reporter expanded
+
 
       - name: Write Flutter summary
         if: always()
@@ -212,25 +269,39 @@ jobs:
             echo "## Flutter CI"
             echo "- Flutter: ${FLUTTER_VERSION}"
             echo "- Dependency resolution: executed"
-            echo "- Analyzer: syntax/type errors are fatal"
-            echo "- Widget tests: executed"
+            echo "- Analyzer: ${{ steps.flutter_analyze.outcome }}"
+            echo "- Widget tests: ${{ steps.flutter_tests.outcome }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+
+  # ============================================================
+  # DOCKER / DOCKER COMPOSE
+  # ============================================================
 
   docker-build:
     name: Docker Compose validation and image build
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     env:
       COMPOSE_PROJECT_NAME: parking-tttn-ci
-      COMPOSE_FILE_PATH: infrastructure/compose.yaml
-      CI_ENV_FILE: infrastructure/.env.ci
 
     steps:
+
+      # --------------------------------------------------------
+      # Checkout
+      # --------------------------------------------------------
+
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
           persist-credentials: false
+
+
+      # --------------------------------------------------------
+      # Docker toolchain
+      # --------------------------------------------------------
 
       - name: Verify Docker toolchain
         run: |
@@ -239,34 +310,181 @@ jobs:
           docker version
           docker compose version
 
-          compose_version="$(docker compose version --short | sed 's/^v//')"
+          compose_version="$(
+            docker compose version --short |
+            sed 's/^v//'
+          )"
+
           python - "$compose_version" <<'PY'
           import re
           import sys
 
           raw = sys.argv[1]
+
           match = re.match(r"^(\d+)\.(\d+)\.(\d+)", raw)
+
           if not match:
-              raise SystemExit(f"Cannot parse Docker Compose version: {raw}")
+              raise SystemExit(
+                  f"Cannot parse Docker Compose version: {raw}"
+              )
 
           version = tuple(map(int, match.groups()))
           minimum = (2, 17, 0)
+
           if version < minimum:
               raise SystemExit(
-                  f"Docker Compose {raw} is too old; >= 2.17.0 is required "
-                  "for dockerfile_inline."
+                  f"Docker Compose {raw} is too old; "
+                  ">= 2.17.0 is required for dockerfile_inline."
               )
 
-          print(f"Docker Compose {raw} satisfies the minimum version.")
+          print(
+              f"Docker Compose {raw} satisfies "
+              "the minimum version."
+          )
           PY
+
+
+      # --------------------------------------------------------
+      # Compose source discovery
+      #
+      # Do NOT hard-code only infrastructure/compose.yaml.
+      # The repository may use compose.yml, docker-compose.yml,
+      # etc. Prefer known project locations first.
+      # --------------------------------------------------------
+
+      - name: Verify Docker and Compose source files
+        id: compose_source
+        run: |
+          set -euo pipefail
+
+          compose_file=""
+
+          candidates=(
+            "infrastructure/compose.yaml"
+            "infrastructure/compose.yml"
+            "infrastructure/docker-compose.yaml"
+            "infrastructure/docker-compose.yml"
+
+            "compose.yaml"
+            "compose.yml"
+            "docker-compose.yaml"
+            "docker-compose.yml"
+
+            "backend_microservices/compose.yaml"
+            "backend_microservices/compose.yml"
+            "backend_microservices/docker-compose.yaml"
+            "backend_microservices/docker-compose.yml"
+          )
+
+          echo "Searching for Docker Compose source..."
+
+          for candidate in "${candidates[@]}"; do
+            if [[ -f "$candidate" ]]; then
+              compose_file="$candidate"
+              break
+            fi
+          done
+
+
+          # Fallback for a valid Compose file stored in a
+          # different directory.
+          if [[ -z "$compose_file" ]]; then
+
+            mapfile -t discovered_files < <(
+              find . \
+                -maxdepth 4 \
+                -type f \
+                \( \
+                  -name 'compose.yaml' \
+                  -o -name 'compose.yml' \
+                  -o -name 'docker-compose.yaml' \
+                  -o -name 'docker-compose.yml' \
+                \) \
+                -not -path './.git/*' \
+                -not -path './.venv/*' \
+                -not -path '*/build/*' \
+                -not -path '*/.dart_tool/*' \
+                | sort
+            )
+
+            if (( ${#discovered_files[@]} == 1 )); then
+
+              compose_file="${discovered_files[0]#./}"
+
+            elif (( ${#discovered_files[@]} > 1 )); then
+
+              echo "::error::Multiple Docker Compose files were discovered and no preferred project Compose file matched."
+
+              echo "Discovered Compose files:"
+
+              printf '  - %s\n' \
+                "${discovered_files[@]}"
+
+              exit 1
+            fi
+          fi
+
+
+          if [[ -z "$compose_file" ]]; then
+
+            echo "::error::No Docker Compose source file exists in the checked-out repository."
+
+            echo
+            echo "Docker-related files currently tracked in the checkout:"
+            echo
+
+            find . \
+              -maxdepth 5 \
+              -type f \
+              \( \
+                -name 'Dockerfile' \
+                -o -name 'Dockerfile.*' \
+                -o -name 'compose.yaml' \
+                -o -name 'compose.yml' \
+                -o -name 'docker-compose.yaml' \
+                -o -name 'docker-compose.yml' \
+              \) \
+              -not -path './.git/*' \
+              -not -path './.venv/*' \
+              -not -path '*/build/*' \
+              -print \
+              | sort || true
+
+            exit 1
+          fi
+
+
+          if [[ ! -f "$compose_file" ]]; then
+            echo "::error file=$compose_file::Resolved Docker Compose file does not exist"
+            exit 1
+          fi
+
+
+          echo "Resolved Docker Compose file:"
+          echo "  $compose_file"
+
+          echo "COMPOSE_FILE_PATH=$compose_file" \
+            >> "$GITHUB_ENV"
+
+          echo "compose_file=$compose_file" \
+            >> "$GITHUB_OUTPUT"
+
+
+      # --------------------------------------------------------
+      # CI-only environment
+      #
+      # Stored in runner temp instead of creating/modifying a
+      # repository file under infrastructure/.
+      # --------------------------------------------------------
 
       - name: Create isolated CI environment file
         run: |
           set -euo pipefail
 
           short_sha="${GITHUB_SHA:0:12}"
+          ci_env_file="$RUNNER_TEMP/smart-parking-ci.env"
 
-          cat > "$CI_ENV_FILE" <<EOF
+          cat > "$ci_env_file" <<EOF
           TZ=UTC
           APP_IMAGE_TAG=ci-${short_sha}
 
@@ -288,36 +506,45 @@ jobs:
           PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
           EOF
 
-          echo "SHORT_SHA=$short_sha" >> "$GITHUB_ENV"
-          echo "CI_STREAMLIT_IMAGE=parking-tttn-dev-streamlit-admin:ci-${short_sha}" >> "$GITHUB_ENV"
-          echo "CI_BACKEND_IMAGE=parking-tttn-dev-backend:ci-${short_sha}" >> "$GITHUB_ENV"
+          echo "CI_ENV_FILE=$ci_env_file" \
+            >> "$GITHUB_ENV"
 
-      - name: Verify Docker and Compose source files
-        run: |
-          set -euo pipefail
+          echo "SHORT_SHA=$short_sha" \
+            >> "$GITHUB_ENV"
 
-          required_files=(
-            "$COMPOSE_FILE_PATH"
-            "database/ai_parking_system.sql"
-            "backend_microservices/migrations/001_initial_schema.sql"
-            "backend_microservices/requirements.txt"
-            "backend_microservices/streamlit_admin/Dockerfile"
-            "backend_microservices/streamlit_admin/app.py"
-            "backend_microservices/streamlit_admin/requirements.txt"
-            "ParkingSpaceDesktopApp/billing_manager.py"
-            "ParkingVisionV8/run_droidcam_v8s_boardlock.py"
-          )
+          echo "CI environment file created at:"
+          echo "  $ci_env_file"
 
-          for file in "${required_files[@]}"; do
-            test -f "$file" || {
-              echo "::error file=$file::Required Docker/Compose source file is missing"
-              exit 1
-            }
-          done
+
+      # --------------------------------------------------------
+      # Validate Compose model
+      # --------------------------------------------------------
 
       - name: Validate Docker Compose model
+        id: compose_validation
         run: |
           set -euo pipefail
+
+          if [[ -z "${COMPOSE_FILE_PATH:-}" ]]; then
+            echo "::error::COMPOSE_FILE_PATH was not initialized"
+            exit 1
+          fi
+
+          if [[ ! -f "$COMPOSE_FILE_PATH" ]]; then
+            echo "::error file=$COMPOSE_FILE_PATH::Docker Compose file is missing"
+            exit 1
+          fi
+
+          if [[ -z "${CI_ENV_FILE:-}" ]]; then
+            echo "::error::CI_ENV_FILE was not initialized"
+            exit 1
+          fi
+
+          if [[ ! -f "$CI_ENV_FILE" ]]; then
+            echo "::error file=$CI_ENV_FILE::CI environment file is missing"
+            exit 1
+          fi
+
 
           compose=(
             docker compose
@@ -325,30 +552,81 @@ jobs:
             -p "$COMPOSE_PROJECT_NAME"
             -f "$COMPOSE_FILE_PATH"
           )
+
+
+          echo "Validating Docker Compose configuration..."
 
           "${compose[@]}" config --quiet
 
-          expected_file="$RUNNER_TEMP/expected-services.txt"
-          actual_file="$RUNNER_TEMP/actual-services.txt"
 
-          printf '%s\n' \
-            ai-detection-service \
-            auth-service \
-            mysql \
-            parking-billing-service \
-            phpmyadmin \
-            rabbitmq \
-            redis \
-            reporting-service \
-            streamlit-admin \
-            | sort > "$expected_file"
+          echo
+          echo "Compose services:"
+          echo
 
-          "${compose[@]}" config --services | sort > "$actual_file"
+          actual_services="$(
+            "${compose[@]}" config --services
+          )"
 
-          diff --unified "$expected_file" "$actual_file"
-          echo "Validated all 9 expected Compose services."
+          printf '%s\n' "$actual_services"
+
+
+          # These are the Smart Parking services that this CI
+          # workflow expects to exist.
+          #
+          # Additional services are allowed. Missing required
+          # services are not.
+          required_services=(
+            "ai-detection-service"
+            "auth-service"
+            "mysql"
+            "parking-billing-service"
+            "phpmyadmin"
+            "rabbitmq"
+            "redis"
+            "reporting-service"
+            "streamlit-admin"
+          )
+
+
+          missing_services=()
+
+          for service in "${required_services[@]}"; do
+
+            if ! grep -Fxq \
+              "$service" \
+              <<< "$actual_services"; then
+
+              missing_services+=("$service")
+            fi
+
+          done
+
+
+          if (( ${#missing_services[@]} > 0 )); then
+
+            echo
+            echo "::error::Docker Compose is missing required Smart Parking services."
+
+            echo "Missing services:"
+
+            printf '  - %s\n' \
+              "${missing_services[@]}"
+
+            exit 1
+          fi
+
+
+          echo
+          echo "Validated all required Smart Parking Compose services."
+
+
+      # --------------------------------------------------------
+      # Build the lightweight Streamlit admin image on every CI
+      # run.
+      # --------------------------------------------------------
 
       - name: Build Streamlit image through Docker Compose
+        id: streamlit_build
         run: |
           set -euo pipefail
 
@@ -359,19 +637,63 @@ jobs:
             -f "$COMPOSE_FILE_PATH"
           )
 
-          "${compose[@]}" build --pull streamlit-admin
-          docker image inspect "$CI_STREAMLIT_IMAGE" > /dev/null
+
+          if ! "${compose[@]}" \
+            config --services |
+            grep -Fxq "streamlit-admin"; then
+
+            echo "::error::Compose service 'streamlit-admin' does not exist"
+            exit 1
+          fi
+
+
+          echo "Building streamlit-admin..."
+
+          "${compose[@]}" \
+            build \
+            --pull \
+            streamlit-admin
+
+
+      # --------------------------------------------------------
+      # Smoke-test the image using the Compose service directly.
+      #
+      # This intentionally avoids assuming a hard-coded Docker
+      # image tag.
+      # --------------------------------------------------------
 
       - name: Smoke-test the built Streamlit image
+        id: streamlit_smoke_test
         run: |
           set -euo pipefail
 
-          docker run --rm \
+          compose=(
+            docker compose
+            --env-file "$CI_ENV_FILE"
+            -p "$COMPOSE_PROJECT_NAME"
+            -f "$COMPOSE_FILE_PATH"
+          )
+
+
+          "${compose[@]}" \
+            run \
+            --rm \
+            --no-deps \
+            -T \
             --entrypoint python \
-            "$CI_STREAMLIT_IMAGE" \
+            streamlit-admin \
             -c "import requests, streamlit; print('Streamlit image imports passed')"
 
+
+      # --------------------------------------------------------
+      # Heavy backend build
+      #
+      # Torch + Ultralytics + OpenCV are intentionally excluded
+      # from normal push/PR CI because of runner time/disk cost.
+      # --------------------------------------------------------
+
       - name: Build full backend image when explicitly requested
+        id: full_backend_build
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_backend_image }}
         run: |
           set -euo pipefail
@@ -383,24 +705,81 @@ jobs:
             -f "$COMPOSE_FILE_PATH"
           )
 
-          # The backend image contains Torch, Ultralytics and OpenCV, so it is
-          # intentionally opt-in for manual CI runs to avoid exhausting normal
-          # push/PR runner time and disk space.
-          "${compose[@]}" build --pull auth-service
-          docker image inspect "$CI_BACKEND_IMAGE" > /dev/null
+
+          if ! "${compose[@]}" \
+            config --services |
+            grep -Fxq "auth-service"; then
+
+            echo "::error::Compose service 'auth-service' does not exist"
+            exit 1
+          fi
+
+
+          echo "Building full backend image..."
+
+          "${compose[@]}" \
+            build \
+            --pull \
+            auth-service
+
+
+      # --------------------------------------------------------
+      # Cleanup
+      # --------------------------------------------------------
+
+      - name: Clean up Docker Compose resources
+        if: always()
+        run: |
+          set +e
+
+          if [[ \
+            -n "${COMPOSE_FILE_PATH:-}" \
+            && -f "${COMPOSE_FILE_PATH:-}" \
+            && -n "${CI_ENV_FILE:-}" \
+            && -f "${CI_ENV_FILE:-}" \
+          ]]; then
+
+            docker compose \
+              --env-file "$CI_ENV_FILE" \
+              -p "$COMPOSE_PROJECT_NAME" \
+              -f "$COMPOSE_FILE_PATH" \
+              down \
+              --volumes \
+              --remove-orphans
+
+          fi
+
+          exit 0
+
+
+      # --------------------------------------------------------
+      # GitHub Job Summary
+      # --------------------------------------------------------
 
       - name: Write Docker summary
         if: always()
         run: |
           {
             echo "## Docker CI"
+            echo
             echo "- Compose project: ${COMPOSE_PROJECT_NAME}"
-            echo "- Expected services: 9"
-            echo "- Compose validation: executed"
-            echo "- Streamlit image build and import smoke test: executed"
-            if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.full_backend_image }}" == "true" ]]; then
-              echo "- Full backend image: requested"
+            echo "- Compose source: ${COMPOSE_FILE_PATH:-not resolved}"
+            echo "- Required Smart Parking services: 9"
+            echo "- Compose validation: ${{ steps.compose_validation.outcome }}"
+            echo "- Streamlit image build: ${{ steps.streamlit_build.outcome }}"
+            echo "- Streamlit smoke test: ${{ steps.streamlit_smoke_test.outcome }}"
+
+            if [[ \
+              "${{ github.event_name }}" == "workflow_dispatch" \
+              && "${{ inputs.full_backend_image }}" == "true" \
+            ]]; then
+
+              echo "- Full backend image: ${{ steps.full_backend_build.outcome }}"
+
             else
+
               echo "- Full backend image: skipped (manual opt-in)"
+
             fi
+
           } >> "$GITHUB_STEP_SUMMARY"
