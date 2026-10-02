@@ -3,6 +3,7 @@ import hashlib
 import secrets
 import hmac
 import base64
+import typing
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 
@@ -12,6 +13,11 @@ try:
     HAS_MYSQL_CONNECTOR = True
 except ImportError:
     HAS_MYSQL_CONNECTOR = False
+    class _DummyConnector:
+        connect: Any = None
+    class _DummyMysql:
+        connector = _DummyConnector()
+    mysql = _DummyMysql()
 
 try:
     # pyrefly: ignore [missing-source-for-stubs]
@@ -19,6 +25,9 @@ try:
     HAS_PYMYSQL = True
 except ImportError:
     HAS_PYMYSQL = False
+    class _DummyPymysql:
+        connect: Any = None
+    pymysql = _DummyPymysql()
 
 def hash_password(password: str) -> str:
     """Hashes a password using PBKDF2 with HMAC-SHA256."""
@@ -63,7 +72,7 @@ class DatabaseManager:
         if not HAS_MYSQL_CONNECTOR and not HAS_PYMYSQL:
             raise DatabaseError("Thiếu thư viện kết nối MySQL. Vui lòng cài mysql-connector-python hoặc pymysql.")
             
-    def get_connection(self):
+    def get_connection(self) -> typing.Any:
         try:
             if HAS_MYSQL_CONNECTOR:
                 return mysql.connector.connect(
@@ -151,8 +160,8 @@ class DatabaseManager:
                         }
                 return None
             finally:
-                if 'cursor' in locals() and cursor is not None:
-                    cursor.close()
+                if locals().get('cursor') is not None:
+                    locals()['cursor'].close()
                 conn.close()
         except DatabaseError:
             raise
@@ -172,7 +181,7 @@ class DatabaseManager:
             print(f"Warning: Failed to update last login: {e}")
 
     # pyrefly: ignore [bad-function-definition]
-    def upsert_active_parking_session(self, transaction_id: str, run_id: str, input_mode: str, input_source: str, slot_id: str, gio_vao: float, user_id: int = None):
+    def upsert_active_parking_session(self, transaction_id: str, run_id: str, input_mode: str, input_source: str, slot_id: str, gio_vao: float, user_id: typing.Optional[int] = None):
         try:
             conn = self.get_connection()
             try:
@@ -215,7 +224,7 @@ class DatabaseManager:
             print(f"Warning: Failed to complete parking session: {e}")
             
     # pyrefly: ignore [bad-function-definition]
-    def save_completed_transaction(self, transaction: Any, user_id: int = None):
+    def save_completed_transaction(self, transaction: Any, user_id: typing.Optional[int] = None):
         # Uses standard upsert followed by update for consistency, or direct insert for completed
         try:
             conn = self.get_connection()
@@ -318,7 +327,7 @@ class DatabaseManager:
         return where_clause, params
 
     # pyrefly: ignore [bad-function-definition]
-    def count_parking_history(self, filters: Dict[str, Any] = None) -> int:
+    def count_parking_history(self, filters: typing.Optional[Dict[str, Any]] = None) -> int:
         try:
             conn = self.get_connection()
             try:
@@ -333,7 +342,7 @@ class DatabaseManager:
             raise DatabaseError(f"Lỗi đếm lịch sử: {e}")
 
     # pyrefly: ignore [bad-function-definition]
-    def fetch_parking_history(self, filters: Dict[str, Any] = None, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    def fetch_parking_history(self, filters: typing.Optional[Dict[str, Any]] = None, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         try:
             conn = self.get_connection()
             try:
@@ -405,7 +414,7 @@ class DatabaseManager:
             raise DatabaseError(f"Lỗi cập nhật cấu hình: {e}")
 
     # pyrefly: ignore [bad-function-definition]
-    def fetch_revenue_by_day(self, filters: Dict[str, Any] = None) -> List[Tuple[str, int]]:
+    def fetch_revenue_by_day(self, filters: typing.Optional[Dict[str, Any]] = None) -> List[Tuple[str, int]]:
         try:
             conn = self.get_connection()
             try:
@@ -433,7 +442,7 @@ class DatabaseManager:
             raise DatabaseError(f"Lỗi lấy doanh thu theo ngày: {e}")
 
     # pyrefly: ignore [bad-function-definition]
-    def fetch_revenue_statistics(self, filters: Dict[str, Any] = None) -> Dict[str, Any]:
+    def fetch_revenue_statistics(self, filters: typing.Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         try:
             conn = self.get_connection()
             try:

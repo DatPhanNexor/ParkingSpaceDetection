@@ -47,7 +47,7 @@ class SlotsState {
   int get occupiedCount => slots.where((slot) => slot.isOccupied).length;
   int get unknownCount => totalCount - knownCount;
   double get occupancyRate =>
-      knownCount == 0 ? 0 : (occupiedCount / knownCount) * 100;
+      totalCount == 0 ? 0 : (occupiedCount / totalCount) * 100;
 
   SlotsState copyWith({
     List<Slot>? slots,
@@ -68,12 +68,28 @@ class SlotsState {
 
 class SlotsNotifier extends Notifier<SlotsState> {
   StreamSubscription<Map<String, dynamic>>? _wsSub;
+  StreamSubscription<WsConnectionState>? _connectionSub;
+  int _revision = 0;
+  int _fetchRequest = 0;
 
   @override
   SlotsState build() {
     ref.onDispose(() {
       final sub = _wsSub;
       if (sub != null) unawaited(sub.cancel());
+      final connectionSub = _connectionSub;
+      if (connectionSub != null) unawaited(connectionSub.cancel());
+    });
+    final service = ref.read(wsServiceProvider);
+    _wsSub = service.messages.listen(applyRealtimeMessage);
+    _connectionSub = service.connectionState.listen((connection) {
+      if (connection == WsConnectionState.disconnected ||
+          connection == WsConnectionState.reconnecting ||
+          connection == WsConnectionState.paused) {
+        state = state.copyWith(slots: _unknownSlots(), isStale: true);
+      } else if (connection == WsConnectionState.connected && state.isStale) {
+        unawaited(fetch(silent: true));
+      }
     });
     return SlotsState(slots: _unknownSlots());
   }
@@ -82,8 +98,13 @@ class SlotsNotifier extends Notifier<SlotsState> {
     if (!silent) {
       state = state.copyWith(isLoading: true, error: null);
     }
+    final requestRevision = _revision;
+    final requestId = ++_fetchRequest;
     try {
       final slots = await ref.read(parkingRepositoryProvider).getSlots();
+      // A REST response started before a newer realtime snapshot must not win.
+      if (requestRevision != _revision || requestId != _fetchRequest) return;
+      _revision++;
       state = SlotsState(slots: slots, lastUpdated: DateTime.now());
     } catch (error) {
       state = state.copyWith(
@@ -94,11 +115,40 @@ class SlotsNotifier extends Notifier<SlotsState> {
     }
   }
 
-  void listenToWebSocket() {
-    _wsSub?.cancel();
-    _wsSub = ref.read(wsServiceProvider).messages.listen((_) {
-      unawaited(fetch(silent: true));
-    });
+  void applyRealtimeMessage(Map<String, dynamic> message) {
+    final type = message['type']?.toString();
+    if (type == 'parking.snapshot' && message['slots'] is List<dynamic>) {
+      final slots = ref
+          .read(parkingRepositoryProvider)
+          .parseSlotsSnapshot(message);
+      _revision++;
+      state = SlotsState(
+        slots: slots,
+        lastUpdated: DateTime.now(),
+        error: null,
+        isStale: false,
+      );
+      return;
+    }
+
+    // Keep compatibility with a single-slot event while snapshots remain the
+    // authoritative resync mechanism.
+    final raw = message['payload'] is Map<String, dynamic>
+        ? message['payload'] as Map<String, dynamic>
+        : message;
+    if (raw['slot_id'] == null || raw['status'] == null) return;
+    final changed = Slot.fromJson(raw);
+    if (!AppConstants.slotIds.contains(changed.id)) return;
+    final byId = {for (final slot in state.slots) slot.id: slot};
+    byId[changed.id] = changed;
+    _revision++;
+    state = SlotsState(
+      slots: [
+        for (final id in AppConstants.slotIds) byId[id] ?? Slot.unknown(id),
+      ],
+      lastUpdated: DateTime.now(),
+      isStale: false,
+    );
   }
 }
 
@@ -135,8 +185,17 @@ class SessionsState {
 }
 
 class ActiveSessionsNotifier extends Notifier<SessionsState> {
+  StreamSubscription<Map<String, dynamic>>? _wsSub;
+
   @override
-  SessionsState build() => const SessionsState();
+  SessionsState build() {
+    _wsSub = ref.read(wsServiceProvider).messages.listen(applyRealtimeMessage);
+    ref.onDispose(() {
+      final sub = _wsSub;
+      if (sub != null) unawaited(sub.cancel());
+    });
+    return const SessionsState();
+  }
 
   Future<void> fetch({bool silent = false}) async {
     if (!silent) state = state.copyWith(isLoading: true, error: null);
@@ -148,6 +207,18 @@ class ActiveSessionsNotifier extends Notifier<SessionsState> {
     } catch (error) {
       state = state.copyWith(isLoading: false, error: error.toString());
     }
+  }
+
+  void applyRealtimeMessage(Map<String, dynamic> message) {
+    if (message['type'] != 'parking.snapshot' ||
+        message['active_sessions'] is! List<dynamic>) {
+      return;
+    }
+    final sessions = (message['active_sessions'] as List<dynamic>)
+        .whereType<Map<String, dynamic>>()
+        .map(ParkingSession.fromJson)
+        .toList();
+    state = SessionsState(sessions: sessions, lastUpdated: DateTime.now());
   }
 }
 

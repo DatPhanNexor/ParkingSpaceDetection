@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 import csv
 import io
 import logging
+import os
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("reporting_service")
@@ -14,6 +15,8 @@ from shared.database import get_db_connection, redis_client
 from shared.security import get_current_user, require_role, decode_access_token
 
 app = FastAPI(title="Dashboard and Reporting Service")
+
+LIVE_SLOT_KEY_PREFIX = os.getenv("LIVE_OCCUPANCY_KEY_PREFIX", "parking:live:slot")
 
 class ConnectionManager:
     def __init__(self):
@@ -44,10 +47,12 @@ async def _build_slots_snapshot() -> List[Dict[str, Any]]:
     slots = []
     for i in range(1, 10):
         slot_id = f"S0{i}"
-        state = await redis_client.hgetall(f"parking:slot:{slot_id}")
+        # Live occupancy is maintained by desktop-sync-service. Do not fall
+        # back to session/billing Redis keys: those can be stale history.
+        state = await redis_client.hgetall(f"{LIVE_SLOT_KEY_PREFIX}:{slot_id}")
         slots.append({
             "slot_id": slot_id,
-            "status": state.get("status", "EMPTY") if state else "EMPTY",
+            "status": state.get("status", "UNKNOWN") if state else "UNKNOWN",
             "session_id": state.get("session_id") if state else None,
             "started_at": state.get("started_at") if state else None,
             "updated_at": state.get("updated_at") if state else None,
@@ -119,10 +124,10 @@ async def get_slots(current_user: dict = Depends(get_current_user)):
 async def get_slot(slot_id: str, current_user: dict = Depends(get_current_user)):
     if slot_id not in {f"S0{i}" for i in range(1, 10)}:
         raise HTTPException(status_code=404, detail="Slot not found")
-    state = await redis_client.hgetall(f"parking:slot:{slot_id}")
+    state = await redis_client.hgetall(f"{LIVE_SLOT_KEY_PREFIX}:{slot_id}")
     return {
         "slot_id": slot_id,
-        "status": state.get("status", "EMPTY") if state else "EMPTY",
+        "status": state.get("status", "UNKNOWN") if state else "UNKNOWN",
         "session_id": state.get("session_id") if state else None,
         "started_at": state.get("started_at") if state else None,
         "updated_at": state.get("updated_at") if state else None,
@@ -214,7 +219,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         await websocket.send_text(_json_text(await _build_dashboard_snapshot()))
         while True:
             try:
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=3.0)
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
                 if data:
                     try:
                         decoded = json.loads(data)

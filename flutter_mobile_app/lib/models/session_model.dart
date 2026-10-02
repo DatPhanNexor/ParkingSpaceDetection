@@ -1,4 +1,5 @@
 import '../utils/helpers.dart';
+import 'slot_model.dart';
 
 class ParkingSession {
   final String id;
@@ -28,7 +29,7 @@ class ParkingSession {
     return ParkingSession(
       id: (json['session_id'] ?? json['transaction_id'] ?? json['id'] ?? '')
           .toString(),
-      slotId: json['slot_id']?.toString() ?? '',
+      slotId: normalizeSlotId(json['slot_id']),
       startTime: start,
       endTime: end,
       durationSeconds:

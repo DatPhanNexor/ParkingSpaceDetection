@@ -19,17 +19,14 @@ class ParkingRepository {
   Future<List<Slot>> getSlots() async {
     try {
       final response = await _client.dio.get<dynamic>(AppConstants.slotsUrl);
-      final raw = _extractList(response.data, listKey: 'slots');
-      final parsed = raw
-          .whereType<Map<String, dynamic>>()
-          .map(Slot.fromJson)
-          .where((slot) => AppConstants.slotIds.contains(slot.id))
-          .toList();
-      return _normalizeSlots(parsed);
+      return parseSlotsSnapshot(response.data);
     } on DioException catch (error) {
       throw ApiFailure.fromDio(error);
     }
   }
+
+  /// Parses a complete live snapshot without merging it with prior state.
+  List<Slot> parseSlotsSnapshot(dynamic data) => parseSlotsSnapshotData(data);
 
   Future<List<ParkingSession>> getActiveSessions() async {
     try {
@@ -60,6 +57,16 @@ class ParkingRepository {
       throw ApiFailure.fromDio(error);
     }
   }
+}
+
+List<Slot> parseSlotsSnapshotData(dynamic data) {
+  final raw = _extractList(data, listKey: 'slots');
+  final parsed = raw
+      .whereType<Map<String, dynamic>>()
+      .map(Slot.fromJson)
+      .where((slot) => AppConstants.slotIds.contains(slot.id))
+      .toList();
+  return _normalizeSlots(parsed);
 }
 
 List<Slot> _normalizeSlots(List<Slot> slots) {

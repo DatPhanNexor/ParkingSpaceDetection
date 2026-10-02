@@ -17,6 +17,10 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import cv2
+
+
+
+
 import customtkinter as ctk
 from PIL import Image, ImageOps, ImageTk
 
@@ -33,6 +37,7 @@ from billing_manager import (
     format_vnd,
 )
 from detection_engine import DetectionEngine, EngineSettings, VisualState
+
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".m4v"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
@@ -221,7 +226,6 @@ class ParkingSpaceDesktopApp(ctk.CTkFrame):
         self._refresh_source_controls(log_change=False)
         self.after(16, self._pump_preview) # pyright: ignore[reportArgumentType]
         self.after(350, self._refresh_billing_panel) # pyright: ignore[reportArgumentType]
-        self.winfo_toplevel().protocol("WM_DELETE_WINDOW", self._on_close)
         self._log("Ready. Clean UI loaded. Full-frame preview enabled, no cropping.")
         if self.parking_map_loaded:
             self._log("Parking map loaded.")
@@ -975,12 +979,9 @@ class ParkingSpaceDesktopApp(ctk.CTkFrame):
         def job():
             cap = None
             try:
-                cap = cv2.VideoCapture(0)
-                opened = bool(cap is not None and cap.isOpened())
-                ok = False
-                if opened:
-                    ok, frame = cap.read()
-                    ok = bool(ok and frame is not None and frame.size > 0)
+                opened = self.engine.open_camera_source(0)
+                cap = opened.cap
+                ok = bool(opened.first_frame is not None and opened.first_frame.size > 0)
             except Exception as exc:
                 self.after(0, lambda e=exc: self._log(f"Cannot open DroidCam on camera 0. Please check DroidCam connection and camera permission. Detail: {e}")) # pyright: ignore[reportArgumentType]
                 self.after(0, lambda: self._set_webcam_status("Not connected")) # pyright: ignore[reportArgumentType]
@@ -1110,8 +1111,13 @@ class ParkingSpaceDesktopApp(ctk.CTkFrame):
         self._log(f"RUN {mode}: {source} | model={corrected}")
         if mode == "Webcam":
             self._log("Selected mode: Webcam")
-            self._log("Device: DroidCam / Phone Camera")
-            self._log(f"Source: {source}")
+            if str(source) == "0":
+                self._log("Device: DroidCam / Phone Camera")
+            elif str(source) == "1":
+                self._log("Device: ACER HD User Facing / Laptop Webcam")
+            else:
+                self._log(f"Device: Camera {source}")
+            self._log(f"Logical source: {source}")
             self._log("Using ParkingVisionV8 bridge with latest-frame-only webcam processing.")
         self._log(f"Resolved model path: {model_path}")
         settings = self._settings()
@@ -1706,5 +1712,3 @@ class ParkingSpaceDesktopApp(ctk.CTkFrame):
         if hasattr(self, "on_action") and self.on_action:
             self.on_action(self._window_action)
 
-    def _on_close(self):
-        self._request_window_close("exit")

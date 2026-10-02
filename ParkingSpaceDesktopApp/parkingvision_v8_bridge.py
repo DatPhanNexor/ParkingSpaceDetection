@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Tuple, TypedDict, Union
+from typing import Any, Dict, List, Optional, Tuple, TypedDict, Union, cast
 import importlib.util
 import signal
 import sys
@@ -12,7 +12,12 @@ import threading
 import time
 
 import cv2
+
+
+
+
 import numpy as np
+
 
 PARKINGVISION_TEMPLATE_CANDIDATES = (
     "parkingvision_slots_template_9zones.json",
@@ -193,7 +198,7 @@ class ParkingVisionV8BoardlockEngine:
         parsed = self._parse_source(source)
         caps = []
         if isinstance(parsed, int):
-            caps = [cv2.VideoCapture(parsed, cv2.CAP_DSHOW), cv2.VideoCapture(parsed, cv2.CAP_MSMF), cv2.VideoCapture(parsed)]
+            caps = [cv2.VideoCapture(parsed, cv2.CAP_DSHOW), cv2.VideoCapture(parsed, cv2.CAP_MSMF)]
         else:
             caps = [cv2.VideoCapture(parsed, cv2.CAP_FFMPEG), cv2.VideoCapture(parsed)]
 
@@ -333,14 +338,13 @@ class ParkingVisionV8BoardlockEngine:
                         poly_val = tuple((int(pt[0]), int(pt[1])) for pt in poly_val)
 
                     candidates.append(
-                        {
+                        cast(SlotStatePayload, {
                             "slot_id": int(result.id),
                             "state": str(result.label),
                             "confidence": float(confidence_value) if confidence_value is not None else None,
-                            # pyrefly: ignore [bad-assignment]
-                            "box": box_val,
-                            "polygon": poly_val,
-                        }
+                            "box": cast(Optional[Tuple[int, int, int, int]], box_val),
+                            "polygon": cast(Optional[Tuple[Tuple[int, int], ...]], poly_val),
+                        })
                     )
                 slot_ids = {item["slot_id"] for item in candidates}
                 if slot_ids == set(range(1, total + 1)):

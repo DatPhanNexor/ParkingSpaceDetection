@@ -16,7 +16,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Sequence, Optional, Any
 
 
 LOGGER = logging.getLogger(__name__)
@@ -183,8 +183,8 @@ class BillingManager:
         self._positions: dict[str, _PositionState] = {}
         self._transactions: list[CompletedTransaction] = []
         self._total_revenue_vnd = 0
-        self.db_manager = None
-        self.db_user_id = None
+        self.db_manager: Optional[Any] = None
+        self.db_user_id: Optional[int] = None
 
     @property
     def run_id(self) -> str:
@@ -398,7 +398,7 @@ class BillingManager:
                 last_seen=observed_at,
                 transaction_id=tx_id,
             )
-            if getattr(self, 'db_manager', None):
+            if getattr(self, 'db_manager', None) is not None and self.db_manager is not None:
                 self.db_manager.upsert_active_parking_session(
                     transaction_id=tx_id,
                     run_id=self._run_id,
@@ -436,7 +436,7 @@ class BillingManager:
         self._transactions.append(transaction)
         self._total_revenue_vnd += transaction.fee_vnd
         
-        if getattr(self, 'db_manager', None):
+        if getattr(self, 'db_manager', None) is not None and self.db_manager is not None:
             self.db_manager.complete_parking_session(
                 transaction_id=transaction.transaction_id,
                 gio_ra=transaction.ended_at,

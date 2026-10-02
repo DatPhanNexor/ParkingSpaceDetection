@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import sys
@@ -118,4 +118,9 @@ def test_scan_camera_failure_returns_empty(monkeypatch):
             pass
 
     monkeypatch.setattr(cv2, "VideoCapture", FakeCapture)
+    
+    # Also mock PygrabberCapture in detection_engine to return False
+    import detection_engine
+    monkeypatch.setattr(detection_engine, "PygrabberCapture", FakeCapture, raising=False)
+    
     assert make_engine().scan_cameras(2) == []

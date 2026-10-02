@@ -248,8 +248,7 @@ class ManagementDashboard(ctk.CTk):
                 summary = self.db_manager.fetch_dashboard_summary()
                 revenue = self.db_manager.fetch_revenue_by_slot()
                 freq = self.db_manager.fetch_frequency_by_slot()
-                # pyrefly: ignore [unexpected-keyword]
-                hist = self.db_manager.fetch_parking_history(filter_type=self.filter_var.get())
+                hist = self.db_manager.fetch_parking_history(filters={"time_filter": self.filter_var.get()})
                 if not self._is_closing:
                     self.after(0, self._update_ui, summary, revenue, freq, hist)
             except Exception as e:

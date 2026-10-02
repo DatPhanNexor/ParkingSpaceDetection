@@ -81,7 +81,8 @@ class AuthWindow(ctk.CTkFrame):
                 icon = ImageOps.contain(logo, (64, 64), Image.Resampling.LANCZOS)
                 self.window_icon_ref = ImageTk.PhotoImage(icon)
                 # pyrefly: ignore [bad-argument-type]
-                self.winfo_toplevel().iconphoto(True, self.window_icon_ref)
+                import typing
+                self.winfo_toplevel().iconphoto(True, typing.cast(tk.PhotoImage, self.window_icon_ref))
                 if platform.system() == "Windows" and ico_path.exists():
                     self.winfo_toplevel().iconbitmap(default=str(ico_path))
                 

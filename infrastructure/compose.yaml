@@ -486,6 +486,35 @@ services:
       retries: 30
       start_period: 45s
 
+  desktop-sync-service:
+    <<: *backend-common
+    command:
+      - uvicorn
+      - services.desktop_sync_service.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8005"
+      - --workers
+      - "1"
+    ports:
+      - "${DESKTOP_SYNC_PORT:-8005}:8005"
+    depends_on:
+      database-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health', timeout=3).read()
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+
   streamlit-admin:
     image: parking-tttn-dev-streamlit-admin:${APP_IMAGE_TAG:-local}
     build:

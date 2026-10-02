@@ -27,7 +27,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   int _currentIndex = 0;
   Timer? _pollTimer;
-  StreamSubscription<Map<String, dynamic>>? _wsSub;
+  bool _startingLiveMonitoring = false;
 
   @override
   void initState() {
@@ -42,13 +42,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
-    unawaited(_wsSub?.cancel());
-    unawaited(ref.read(wsServiceProvider).disconnect(paused: true));
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
     if (state == AppLifecycleState.resumed) {
       _startLiveMonitoring();
     } else if (state == AppLifecycleState.paused ||
@@ -59,27 +58,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _startLiveMonitoring() async {
-    if (!mounted) return;
-    await _refreshOperationalData();
-    await _connectWebSocket();
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(AppConstants.restSnapshotInterval, (_) {
-      unawaited(_refreshOperationalData(silent: true));
-    });
+    if (!mounted || _startingLiveMonitoring) return;
+    _startingLiveMonitoring = true;
+    try {
+      await _refreshOperationalData();
+      if (!mounted) return;
+      await _connectWebSocket();
+      if (!mounted) return;
+      _pollTimer?.cancel();
+      _pollTimer = Timer.periodic(AppConstants.restSnapshotInterval, (_) {
+        unawaited(_refreshOperationalData(silent: true));
+      });
+    } finally {
+      _startingLiveMonitoring = false;
+    }
   }
 
   Future<void> _connectWebSocket() async {
     final token = await ref.read(authRepositoryProvider).getToken();
     if (!mounted || token == null || token.isEmpty) return;
     final service = ref.read(wsServiceProvider);
+    // The Slots/ActiveSessions notifiers subscribe at provider scope before
+    // this handshake, so the initial full snapshot cannot be missed.
     await service.connect(token);
-    await _wsSub?.cancel();
-    _wsSub = service.messages.listen((_) {
-      unawaited(_refreshOperationalData(silent: true));
-    });
   }
 
   Future<void> _refreshOperationalData({bool silent = false}) async {
+    if (!mounted) return;
     await Future.wait([
       ref.read(slotsProvider.notifier).fetch(silent: silent),
       ref.read(activeSessionsProvider.notifier).fetch(silent: silent),
@@ -91,7 +96,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Future<void> _logout() async {
     _pollTimer?.cancel();
-    await _wsSub?.cancel();
     await ref.read(wsServiceProvider).disconnect();
     await ref.read(authStateProvider.notifier).logout();
   }

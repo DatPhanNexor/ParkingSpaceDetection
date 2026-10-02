@@ -25,7 +25,7 @@ class Slot {
       _ => 'UNKNOWN',
     };
     return Slot(
-      id: json['slot_id']?.toString() ?? json['id']?.toString() ?? '',
+      id: normalizeSlotId(json['slot_id'] ?? json['id']),
       status: status,
       sessionId: _optionalText(json['session_id']),
       startedAt: tryParseDate(json['started_at']),
@@ -52,6 +52,19 @@ class Slot {
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
+}
+
+/// Accept both the backend code (S01) and the detector's canonical region id (1).
+String normalizeSlotId(dynamic raw) {
+  final text = raw?.toString().trim().toUpperCase() ?? '';
+  if (text.isEmpty) return '';
+  final numeric =
+      int.tryParse(text) ??
+      int.tryParse(text.replaceFirst(RegExp(r'^S0?'), ''));
+  if (numeric != null && numeric >= 1 && numeric <= 9) {
+    return 'S${numeric.toString().padLeft(2, '0')}';
+  }
+  return text;
 }
 
 String? _optionalText(dynamic value) {

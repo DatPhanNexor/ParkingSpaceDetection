@@ -53,11 +53,11 @@ def main() -> int:
         print("\nCtrl+C received. Closing app safely...")
         if current_app and hasattr(current_app, "shutdown_from_terminal"):
             try:
-                current_app.shutdown_from_terminal()
+                getattr(current_app, "shutdown_from_terminal")()
             except Exception:
                 root.quit()
         else:
-            root.quit()
+            shutdown_app()
 
     old_sigint = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, handle_sigint)
@@ -91,7 +91,7 @@ def main() -> int:
             if action == "logout":
                 show_auth()
             elif action == "exit":
-                root.quit()
+                shutdown_app()
 
         current_app = ParkingSpaceDesktopApp(
             parent=root, 
@@ -107,12 +107,33 @@ def main() -> int:
         current_app.pack(fill="both", expand=True)
 
     # 3. Setup đóng chương trình an toàn qua dấu X
+    def shutdown_app():
+        if getattr(root, "_is_shutting_down", False):
+            return
+        setattr(root, "_is_shutting_down", True)
+        
+        try:
+            cancel_all_tcl_afters(root)
+        except Exception:
+            pass
+            
+        try:
+            root.quit()
+        except Exception:
+            pass
+            
+        try:
+            root.update()
+            root.destroy()
+        except Exception:
+            pass
+
     def on_root_close():
         if current_app and hasattr(current_app, "_request_window_close"):
             # Yêu cầu AI app tự dọn dẹp camera trước
-            current_app._request_window_close("exit")
+            getattr(current_app, "_request_window_close")("exit")
         else:
-            root.quit()
+            shutdown_app()
 
     root.protocol("WM_DELETE_WINDOW", on_root_close)
 
@@ -125,7 +146,7 @@ def main() -> int:
     except KeyboardInterrupt:
         if current_app and hasattr(current_app, "shutdown_from_terminal"):
             try:
-                current_app.shutdown_from_terminal()
+                getattr(current_app, "shutdown_from_terminal")()
             except:
                 pass
 

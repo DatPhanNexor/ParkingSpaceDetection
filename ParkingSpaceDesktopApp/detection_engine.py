@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from importlib import import_module
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Protocol, Sequence, Tuple, TypedDict, Union, cast
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Protocol, Sequence, Tuple, TypedDict, Union, cast
 from urllib.parse import urlparse
 import csv
 import json
@@ -12,7 +12,12 @@ import time
 import uuid
 
 import cv2
+
+
+
+
 import numpy as np
+
 
 class TorchCudaAPI(Protocol):
     def is_available(self) -> bool: ...
@@ -186,7 +191,7 @@ class ProjectPaths:
 
 @dataclass
 class CameraOpenResult:
-    cap: cv2.VideoCapture
+    cap: Any
     first_frame: Optional[np.ndarray]
     source: Union[int, str]
     label: str
@@ -212,8 +217,20 @@ def parse_camera_source(source: Union[str, int]) -> Union[int, str]:
     text = str(source or "").strip().strip('"')
     if not text:
         raise ValueError("Camera source is required (index or HTTP/HTTPS/RTSP URL).")
+    
+    low = text.lower()
+    if "droidcam" in low:
+        return 0
+    if "webcam" in low:
+        return 1
+    if " - " in text:
+        head = text.split(" - ", 1)[0].strip()
+        if head.isdigit():
+            return int(head)
+
     if text.isdigit():
         return int(text)
+    
     parsed = urlparse(text)
     if parsed.scheme.lower() in {"http", "https", "rtsp"} and parsed.netloc:
         return text
@@ -237,35 +254,163 @@ def _video_capture(source: Union[int, str], backend: Optional[int] = None) -> cv
     return cv2.VideoCapture(source, backend)
 
 
+import time
+
+class PygrabberCapture:
+    def __init__(self, index: int, width: int, height: int):
+        from pygrabber.dshow_graph import FilterGraph
+        import comtypes
+        comtypes.CoInitialize()
+        self.graph = FilterGraph()
+        self.graph.add_video_input_device(index)
+        self.latest_frame = None
+        def on_frame(image):
+            self.latest_frame = image
+        self.graph.add_sample_grabber(on_frame)
+        self.graph.add_null_render()
+        self.graph.prepare_preview_graph()
+        self.graph.run()
+        self.opened = True
+        self.width = width
+        self.height = height
+
+    def isOpened(self):
+        return self.opened
+
+    def read(self):
+        if not self.opened:
+            return False, None
+        self.latest_frame = None
+        if not self.graph or not getattr(self.graph, 'grab_frame', lambda: False)():
+            return False, None
+        for _ in range(30):
+            if self.latest_frame is not None:
+                frame = self.latest_frame
+                if frame.shape[1] != self.width or frame.shape[0] != self.height:
+                    import cv2
+                    frame = cv2.resize(frame, (self.width, self.height))
+                return True, frame
+            time.sleep(0.01)
+        return False, None
+
+    def get(self, prop_id: int) -> float:
+        import cv2
+        if prop_id == cv2.CAP_PROP_FRAME_WIDTH:
+            return float(self.width)
+        if prop_id == cv2.CAP_PROP_FRAME_HEIGHT:
+            return float(self.height)
+        if prop_id == cv2.CAP_PROP_FPS:
+            return 30.0
+        # Live camera: FRAME_COUNT, POS_MSEC, POS_FRAMES, etc. → 0.0
+        return 0.0
+
+    def set(self, prop_id: int, value: float) -> bool:
+        return False
+
+    def release(self):
+        if self.opened:
+            try:
+                if self.graph:
+                    self.graph.stop()
+            except Exception:
+                pass
+            try:
+                if self.graph:
+                    self.graph.remove_filters()
+            except Exception:
+                pass
+            self.graph = None
+            self.opened = False
+            try:
+                import comtypes
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
+
 def open_camera_source(source: Union[str, int], width: int = 1280, height: int = 720) -> CameraOpenResult:
     parsed = parse_camera_source(source)
-    attempts: List[Tuple[str, Optional[int]]] = []
-    if isinstance(parsed, int):
-        attempts = [("ANY", None)]
-    else:
-        attempts = [("FFMPEG", cv2.CAP_FFMPEG), ("ANY", None)]
-
-    errors: List[str] = []
-    for name, backend in attempts:
-        cap = _video_capture(parsed, backend)
+    if not isinstance(parsed, int):
+        # Stream URL or file
+        cap = _video_capture(parsed, getattr(cv2, 'CAP_FFMPEG', cv2.CAP_ANY))
         if not cap.isOpened():
-            errors.append(f"{name}: not opened")
             cap.release()
-            continue
+            cap = _video_capture(parsed, None)
+        if not cap.isOpened():
+            cap.release()
+            raise RuntimeError(f"Cannot open stream {source!r}")
         try:
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        except Exception:
-            pass
+        except Exception: pass
         ok, frame = cap.read()
         if ok and frame is not None and frame.size > 0:
-            return CameraOpenResult(cap=cap, first_frame=frame, source=parsed, label=f"{parsed} via {name}")
-        errors.append(f"{name}: opened but read failed")
+            return CameraOpenResult(cap=cap, first_frame=frame, source=parsed, label=f"Stream {parsed}")
         cap.release()
+        raise RuntimeError(f"Opened stream {source!r} but read failed.")
 
-    hint = "Try camera 0/1/2 or DroidCam URL such as http://192.168.1.11:4747/video"
-    raise RuntimeError(f"Cannot open camera source {source!r}. Attempts: {'; '.join(errors) or 'none'}. {hint}")
+    # Logical int source
+    logical_source = parsed
+    try:
+        from pygrabber.dshow_graph import FilterGraph
+        devices = FilterGraph().get_input_devices()
+    except Exception as e:
+        print(f"[WARN] pygrabber not available: {e}")
+        devices = []
+    
+    is_droidcam = (logical_source == 0)
+    target_idx = None
+    target_name = ''
+    
+    for i, name in enumerate(devices):
+        lname = name.lower()
+        if is_droidcam:
+            if 'droidcam' in lname:
+                target_idx = i
+                target_name = name
+                break
+        else:
+            if any(x in lname for x in ['acer', 'user facing', 'webcam', 'integrated', 'laptop']):
+                target_idx = i
+                target_name = name
+                break
+                
+    if target_idx is None and not is_droidcam and len(devices) > 0:
+        for i, name in enumerate(devices):
+            if 'droidcam' not in name.lower():
+                target_idx = i
+                target_name = name
+                break
+                
+    if target_idx is None:
+        target_idx = logical_source
+        target_name = f'Unknown Device {target_idx}'
+        
+    print(f'[CAMERA] Logical source {logical_source} resolved to {target_name} (Index: {target_idx})')
+    
+    if is_droidcam:
+        try:
+            cap = PygrabberCapture(target_idx, width, height)
+            ok, f = cap.read()
+            if ok and f is not None:
+                return CameraOpenResult(cap=cap, first_frame=f, source=parsed, label=f"{target_name} via Pygrabber")
+            cap.release()
+        except Exception as e:
+            print(f'[ERROR] PygrabberCapture failed: {e}')
+    else:
+        for backend_name, backend_enum in [("DSHOW", cv2.CAP_DSHOW), ("MSMF", cv2.CAP_MSMF), ("ANY", cv2.CAP_ANY)]:
+            cap = cv2.VideoCapture(target_idx, backend_enum)
+            if cap.isOpened():
+                try:
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                except: pass
+                ok, f = cap.read()
+                if ok and f is not None:
+                    return CameraOpenResult(cap=cap, first_frame=f, source=parsed, label=f"{target_name} via {backend_name}")
+                cap.release()
+                
+    raise RuntimeError(f"Cannot open camera source {logical_source} (Resolved: {target_name}). Please check device connection.")
+
+
 
 
 def scan_camera_sources(max_index: int = 2, extra_sources: Optional[Iterable[str]] = None) -> List[str]:
@@ -375,6 +520,7 @@ class DetectionOutput:
     rendered_frame: np.ndarray
     csv_path: str = ""
     image_path: str = ""
+
 
 
 class DetectionEngine:
@@ -1129,7 +1275,7 @@ class DetectionEngine:
                         slot_id=int(item["slot_id"]),
                         state=str(item["state"]),
                         # pyrefly: ignore [bad-argument-type, bad-index]
-                        confidence=float(item["confidence"]) if item.get("confidence") is not None else None,
+                        confidence=float(item.get("confidence") or 0.0) if item.get("confidence") is not None else None,
                         box=item.get("box"),
                         # pyrefly: ignore [missing-attribute]
                         polygon=item.get("polygon"),
@@ -1199,7 +1345,7 @@ class DetectionEngine:
                     slot_id=i,
                     state="OCCUPIED" if item["type"] == "occupied" else "EMPTY",
                     confidence=float(item["conf"]),
-                    box=tuple(int(v) for v in item["box"]),
+                    box=cast(Tuple[int, int, int, int], tuple(int(v) for v in item["box"])),
                     polygon=None
                 ))
             
@@ -1341,7 +1487,7 @@ class DetectionEngine:
                     slot_id=i,
                     state="OCCUPIED" if item["type"] == "occupied" else "EMPTY",
                     confidence=float(item["conf"]),
-                    box=tuple(int(v) for v in item["box"]),
+                    box=cast(Tuple[int, int, int, int], tuple(int(v) for v in item["box"])),
                     polygon=None
                 ))
             
@@ -1530,3 +1676,4 @@ class DetectionEngine:
 
     def scan_cameras(self, max_index: int = 2) -> List[str]:
         return scan_camera_sources(max_index=max_index, extra_sources=COMMON_DROIDCAM_SOURCES)
+

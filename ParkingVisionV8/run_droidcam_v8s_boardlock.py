@@ -2,16 +2,16 @@
 """
 Parking Vision V8S STRICT Occupancy FIX
 
-Fix trá»ng tÃ¢m so vá»›i V11:
-- KhÃ´ng tá»± dá»±ng Ã´ báº±ng YOLO/line-pair lung tung ná»¯a.
-- Tá»± tÃ¬m cá»¥m báº£ng bÃ£i Ä‘á»— báº±ng váº¡ch vÃ ng/Ä‘á»/tráº¯ng, khÃ³a 4 gÃ³c, warp vá» máº·t pháº³ng chuáº©n.
-- Chá»‰ dÃ¹ng 9 vÃ¹ng Ä‘á»— xe template cá»‘ Ä‘á»‹nh trong máº·t pháº³ng warp.
-- Khi camera khÃ´ng nhÃ¬n tháº¥y báº£ng: áº©n toÃ n bá»™ Ã´, khÃ´ng dÃ¹ng cache cÅ© Ä‘á»ƒ váº½ bá»«a.
-- Giáº£m nháº£y Empty/Occupied báº±ng EMA + hysteresis + xÃ¡c nháº­n nhiá»u frame.
-- V13 strict: Ã´ chá»‰ Occupied khi cÃ³ blob váº­t thá»ƒ tháº­t trong vÃ¹ng trong cá»§a Ã´; khÃ´ng dÃ¹ng YOLO Ä‘á»ƒ tá»± quyáº¿t náº¿u thiáº¿u báº±ng chá»©ng hÃ¬nh áº£nh.
+Fix trÃ¡Â»Âng tÃƒÂ¢m so vÃ¡Â»â€ºi V11:
+- KhÃƒÂ´ng tÃ¡Â»Â± dÃ¡Â»Â±ng ÃƒÂ´ bÃ¡ÂºÂ±ng YOLO/line-pair lung tung nÃ¡Â»Â¯a.
+- TÃ¡Â»Â± tÃƒÂ¬m cÃ¡Â»Â¥m bÃ¡ÂºÂ£ng bÃƒÂ£i Ã„â€˜Ã¡Â»â€” bÃ¡ÂºÂ±ng vÃ¡ÂºÂ¡ch vÃƒÂ ng/Ã„â€˜Ã¡Â»Â/trÃ¡ÂºÂ¯ng, khÃƒÂ³a 4 gÃƒÂ³c, warp vÃ¡Â»Â mÃ¡ÂºÂ·t phÃ¡ÂºÂ³ng chuÃ¡ÂºÂ©n.
+- ChÃ¡Â»â€° dÃƒÂ¹ng 9 vÃƒÂ¹ng Ã„â€˜Ã¡Â»â€” xe template cÃ¡Â»â€˜ Ã„â€˜Ã¡Â»â€¹nh trong mÃ¡ÂºÂ·t phÃ¡ÂºÂ³ng warp.
+- Khi camera khÃƒÂ´ng nhÃƒÂ¬n thÃ¡ÂºÂ¥y bÃ¡ÂºÂ£ng: Ã¡ÂºÂ©n toÃƒÂ n bÃ¡Â»â„¢ ÃƒÂ´, khÃƒÂ´ng dÃƒÂ¹ng cache cÃ…Â© Ã„â€˜Ã¡Â»Æ’ vÃ¡ÂºÂ½ bÃ¡Â»Â«a.
+- GiÃ¡ÂºÂ£m nhÃ¡ÂºÂ£y Empty/Occupied bÃ¡ÂºÂ±ng EMA + hysteresis + xÃƒÂ¡c nhÃ¡ÂºÂ­n nhiÃ¡Â»Âu frame.
+- V13 strict: ÃƒÂ´ chÃ¡Â»â€° Occupied khi cÃƒÂ³ blob vÃ¡ÂºÂ­t thÃ¡Â»Æ’ thÃ¡ÂºÂ­t trong vÃƒÂ¹ng trong cÃ¡Â»Â§a ÃƒÂ´; khÃƒÂ´ng dÃƒÂ¹ng YOLO Ã„â€˜Ã¡Â»Æ’ tÃ¡Â»Â± quyÃ¡ÂºÂ¿t nÃ¡ÂºÂ¿u thiÃ¡ÂºÂ¿u bÃ¡ÂºÂ±ng chÃ¡Â»Â©ng hÃƒÂ¬nh Ã¡ÂºÂ£nh.
 
-File nÃ y cá»‘ tÃ¬nh hÆ¡i dÃ i, vÃ¬ mÃ¡y tÃ­nh cÅ©ng pháº£i gÃ¡nh háº­u quáº£ cá»§a viá»‡c con ngÆ°á»i
-muá»‘n mÃ´ hÃ¬nh Ä‘á»“ chÆ¡i hoáº¡t Ä‘á»™ng nhÆ° bÃ£i xe sÃ¢n bay.
+File nÃƒÂ y cÃ¡Â»â€˜ tÃƒÂ¬nh hÃ†Â¡i dÃƒÂ i, vÃƒÂ¬ mÃƒÂ¡y tÃƒÂ­nh cÃ…Â©ng phÃ¡ÂºÂ£i gÃƒÂ¡nh hÃ¡ÂºÂ­u quÃ¡ÂºÂ£ cÃ¡Â»Â§a viÃ¡Â»â€¡c con ngÃ†Â°Ã¡Â»Âi
+muÃ¡Â»â€˜n mÃƒÂ´ hÃƒÂ¬nh Ã„â€˜Ã¡Â»â€œ chÃ†Â¡i hoÃ¡ÂºÂ¡t Ã„â€˜Ã¡Â»â„¢ng nhÃ†Â° bÃƒÂ£i xe sÃƒÂ¢n bay.
 """
 
 from __future__ import annotations
@@ -28,8 +28,13 @@ from typing import Any, Callable, Optional, Protocol, TypedDict, cast, Mapping, 
 
 import argparse
 import cv2
+
+
+
+
 import importlib
 import numpy as np
+
 
 class TorchCudaAPI(Protocol):
     def is_available(self) -> bool: ...
@@ -590,6 +595,7 @@ def parse_source(source_text: str) -> Union[int, str]:
     return str(resolve_path(text))
 
 
+
 def should_run_inference(frame_id: int, yolo_every: int) -> bool:
     """Return whether this frame owns a fresh inference result."""
     return frame_id > 0 and frame_id % max(1, int(yolo_every)) == 0
@@ -657,37 +663,141 @@ def rotate_frame(frame: np.ndarray, angle: int) -> np.ndarray:
     return frame
 
 
+import time
+
+import time
+
+class PygrabberCapture:
+    def __init__(self, index: int, width: int, height: int):
+        from pygrabber.dshow_graph import FilterGraph
+        import comtypes
+        comtypes.CoInitialize()
+        self.graph = FilterGraph()
+        self.graph.add_video_input_device(index)
+        self.latest_frame = None
+        def on_frame(image):
+            self.latest_frame = image
+        self.graph.add_sample_grabber(on_frame)
+        self.graph.add_null_render()
+        self.graph.prepare_preview_graph()
+        self.graph.run()
+        self.opened = True
+        self.width = width
+        self.height = height
+
+    def isOpened(self):
+        return self.opened
+
+    def read(self):
+        if not self.opened:
+            return False, None
+        self.latest_frame = None
+        if not self.graph.grab_frame():
+            return False, None
+        for _ in range(30):
+            if self.latest_frame is not None:
+                frame = self.latest_frame
+                if frame.shape[1] != self.width or frame.shape[0] != self.height:
+                    import cv2
+                    frame = cv2.resize(frame, (self.width, self.height))
+                return True, frame
+            time.sleep(0.01)
+        return False, None
+
+    def set(self, prop, val):
+        return False
+
+    def release(self):
+        if self.opened:
+            try:
+                self.graph.stop()
+            except Exception:
+                pass
+            try:
+                self.graph.remove_filters()
+            except Exception:
+                pass
+            self.graph = None
+            self.opened = False
+            try:
+                import comtypes
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
+
 def open_capture(source: Union[int, str], width: int, height: int, fps: int):
-    if isinstance(source, int):
-        for name, backend in [("MSMF", cv2.CAP_MSMF), ("DSHOW", cv2.CAP_DSHOW), ("ANY", cv2.CAP_ANY)]:
-            cap = cv2.VideoCapture(source, backend)
-            if not cap.isOpened():
-                cap.release()
-                continue
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            cap.set(cv2.CAP_PROP_FPS, fps)
-            ok, frame = cap.read()
-            if ok and frame is not None and frame.size > 0:
-                print(f"[OK] Opened camera {source} with {name}: {frame.shape[1]}x{frame.shape[0]}")
+    if not isinstance(source, int):
+        source_text = str(source)
+        is_stream = source_text.lower().startswith(("http://", "https://", "rtsp://", "rtsps://"))
+        if is_stream:
+            cap = cv2.VideoCapture(source_text, getattr(cv2, "CAP_FFMPEG", cv2.CAP_ANY))
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            return cap
+        return cv2.VideoCapture(source_text)
+
+    logical_source = source
+    try:
+        from pygrabber.dshow_graph import FilterGraph
+        devices = FilterGraph().get_input_devices()
+    except Exception as e:
+        print(f"[WARN] pygrabber not available: {e}")
+        devices = []
+    
+    is_droidcam = (logical_source == 0)
+    target_idx = None
+    target_name = ''
+    
+    for i, name in enumerate(devices):
+        lname = name.lower()
+        if is_droidcam:
+            if 'droidcam' in lname:
+                target_idx = i
+                target_name = name
+                break
+        else:
+            if any(x in lname for x in ['acer', 'user facing', 'webcam', 'integrated', 'laptop']):
+                target_idx = i
+                target_name = name
+                break
+                
+    if target_idx is None and not is_droidcam and len(devices) > 0:
+        for i, name in enumerate(devices):
+            if 'droidcam' not in name.lower():
+                target_idx = i
+                target_name = name
+                break
+                
+    if target_idx is None:
+        target_idx = logical_source
+        target_name = f'Unknown Device {target_idx}'
+        
+    print(f'[CAMERA] Logical source {logical_source} resolved to {target_name} (Index: {target_idx})')
+    
+    if is_droidcam:
+        try:
+            cap = PygrabberCapture(target_idx, width, height)
+            ok, f = cap.read()
+            if ok and f is not None:
                 return cap
             cap.release()
-        return cv2.VideoCapture(source)
-    source_text = str(source)
-    is_stream = source_text.lower().startswith(("http://", "https://", "rtsp://", "rtsps://"))
-    if is_stream:
-        backends = [("FFMPEG", getattr(cv2, "CAP_FFMPEG", cv2.CAP_ANY)), ("ANY", cv2.CAP_ANY)]
-        for name, backend in backends:
-            cap = cv2.VideoCapture(source_text, backend)
-            if not cap.isOpened():
+        except Exception as e:
+            print(f'[ERROR] PygrabberCapture failed: {e}')
+    else:
+        for backend_name, backend_enum in [("DSHOW", cv2.CAP_DSHOW), ("MSMF", cv2.CAP_MSMF), ("ANY", cv2.CAP_ANY)]:
+            cap = cv2.VideoCapture(target_idx, backend_enum)
+            if cap.isOpened():
+                try:
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                    cap.set(cv2.CAP_PROP_FPS, fps)
+                except: pass
+                ok, f = cap.read()
+                if ok and f is not None:
+                    return cap
                 cap.release()
-                continue
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            print(f"[OK] Opened stream with {name}: {source_text}")
-            return cap
-        print(f"[ERROR] Could not open stream source: {source_text}")
-        return cv2.VideoCapture(source_text)
-    return cv2.VideoCapture(source_text)
+                
+    print(f"[ERROR] Cannot open camera {logical_source} (Resolved: {target_name})")
+    return cv2.VideoCapture(target_idx)
 
 
 def enhance_frame(frame: np.ndarray) -> np.ndarray:
@@ -2435,7 +2545,7 @@ def run(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Parking Vision V8S STRICT Occupancy FIX fixed-template runner")
-    p.add_argument("--source", type=str, default="1")
+    p.add_argument("--source", type=str, default="0")
     p.add_argument("--mode", type=str, choices=["boardlock", "outdoor"], default="boardlock")
     p.add_argument("--model", type=str, default="auto")
     p.add_argument("--vehicle-model", type=str, default=str(FALLBACK_MODEL))
@@ -2663,4 +2773,5 @@ def build_parser() -> argparse.ArgumentParser:
 
 if __name__ == "__main__":
     run(build_parser().parse_args())
+
 

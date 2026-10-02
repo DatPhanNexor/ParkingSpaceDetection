@@ -1,5 +1,5 @@
-# pyrefly: ignore [missing-import]
 import streamlit as st
+import typing
 import pandas as pd
 import json
 import re
@@ -7,7 +7,6 @@ import os
 import math
 from numbers import Number
 from datetime import datetime, time
-# pyrefly: ignore [missing-import]
 import plotly.express as px
 from pathlib import Path
 import sys
@@ -804,8 +803,7 @@ def normalize_timestamp(ts):
         if isinstance(ts, (pd.Timestamp, datetime)):
             dt = pd.Timestamp(ts)
         elif isinstance(ts, Number) and not isinstance(ts, bool):
-            # pyrefly: ignore [bad-argument-type]
-            value = float(ts)
+            value = float(typing.cast(float, ts))
             if not math.isfinite(value) or value <= 0:
                 return pd.NaT
             if abs(value) < 10_000_000:
@@ -820,10 +818,9 @@ def normalize_timestamp(ts):
                 return normalize_timestamp(float(raw))
             dt = pd.to_datetime(raw, errors="coerce")
 
-        if pd.isna(dt):
+        if isinstance(dt, type(pd.NaT)):
             return pd.NaT
-
-        dt = pd.Timestamp(dt)
+        dt = pd.Timestamp(typing.cast(typing.Union[str, float, int, datetime], dt))
         if dt.tzinfo is None:
             return dt.tz_localize(VN_TZ, nonexistent="NaT", ambiguous="NaT")
         return dt.tz_convert(VN_TZ)
@@ -837,9 +834,7 @@ def normalize_datetime_series(series):
         return pd.Series(dtype="datetime64[ns, Asia/Ho_Chi_Minh]")
 
     normalized = [normalize_timestamp(value) for value in series.tolist()]
-    converted = pd.to_datetime(normalized, errors="coerce", utc=True)
-    result = pd.Series(converted, index=series.index)
-    return result.dt.tz_convert(VN_TZ)
+    return pd.Series(normalized, index=series.index, dtype="datetime64[ns, Asia/Ho_Chi_Minh]")
 
 
 def ensure_datetime_columns(frame):
@@ -879,11 +874,13 @@ def latest_valid_timestamp(frame):
 def safe_elapsed_seconds(start_value, end_value):
     start_ts = normalize_timestamp(start_value)
     end_ts = normalize_timestamp(end_value)
-    if pd.isna(start_ts) or pd.isna(end_ts):
+    if (start_ts is pd.NaT) or (end_ts is pd.NaT):
         return 0.0
 
-    # pyrefly: ignore [unsupported-operation]
-    delta = (end_ts - start_ts).total_seconds()
+    if isinstance(start_ts, datetime) and isinstance(end_ts, datetime):
+        delta = (end_ts - start_ts).total_seconds()
+    else:
+        return 0.0
     if not math.isfinite(delta):
         return 0.0
     return max(float(delta), 0.0)
@@ -892,16 +889,16 @@ def safe_elapsed_seconds(start_value, end_value):
 def session_elapsed_seconds(row, frame, now_value=None):
     now_ts = normalize_timestamp(now_value or datetime.now(VN_TZ))
     start_ts = normalize_timestamp(row.get("gio_vao"))
-    if pd.isna(start_ts):
+    if (start_ts is pd.NaT):
         return 0.0
 
     mode = str(row.get("input_mode", "")).lower()
     reference_ts = latest_valid_timestamp(frame)
 
     if "video" in mode or start_ts.year <= 1971:
-        end_ts = reference_ts if pd.notna(reference_ts) else start_ts
+        end_ts = reference_ts if isinstance(reference_ts, datetime) else start_ts
     else:
-        end_ts = now_ts if pd.notna(now_ts) else reference_ts
+        end_ts = now_ts if isinstance(now_ts, datetime) else reference_ts
 
     return safe_elapsed_seconds(start_ts, end_ts)
 
@@ -989,7 +986,7 @@ def fetch_and_prepare_data(state, source_filter):
     empty_cols = ['id', 'transaction_id', 'input_mode', 'slot_id', 'gio_vao', 'gio_ra', 'so_phut', 'gia_moi_gio', 'buoc_lam_tron', 'thanh_tien', 'Vị trí']
     
     if source_filter == "Phiên đang hoạt động" and active_mode == "Nguồn chưa được hệ thống ghi nhận":
-        return pd.DataFrame(columns=empty_cols), active_mode
+        return pd.DataFrame(columns=pd.Index(empty_cols)), active_mode
         
     show_legacy = state.get("show_legacy_data", False)
     baseline_raw = state.get("reporting_baseline", "2000-01-01T00:00:00")
@@ -1000,8 +997,7 @@ def fetch_and_prepare_data(state, source_filter):
     
     if not show_legacy:
         sql += " AND created_at >= %s"
-        if pd.notnull(baseline_dt):
-            # pyrefly: ignore [missing-attribute]
+        if isinstance(baseline_dt, datetime):
             baseline_str = baseline_dt.strftime('%Y-%m-%d %H:%M:%S')
         else:
             baseline_str = "2000-01-01 00:00:00"
@@ -1020,15 +1016,14 @@ def fetch_and_prepare_data(state, source_filter):
     display_mode = active_mode if source_filter == "Phiên đang hoạt động" else source_filter
     
     if not rows:
-        return pd.DataFrame(columns=empty_cols), display_mode
+        return pd.DataFrame(columns=pd.Index(empty_cols)), display_mode
         
-    df = pd.DataFrame(rows, columns=['id', 'transaction_id', 'input_mode', 'slot_id', 'gio_vao', 'gio_ra', 'so_phut', 'gia_moi_gio', 'buoc_lam_tron', 'thanh_tien'])
+    df = pd.DataFrame(rows, columns=pd.Index(['id', 'transaction_id', 'input_mode', 'slot_id', 'gio_vao', 'gio_ra', 'so_phut', 'gia_moi_gio', 'buoc_lam_tron', 'thanh_tien']))
     
     # Normalize all time and numeric columns before sorting or comparing.
     df = ensure_datetime_columns(df)
     for column in ('so_phut', 'gia_moi_gio', 'buoc_lam_tron', 'thanh_tien'):
-        # pyrefly: ignore [missing-attribute]
-        df[column] = pd.to_numeric(df[column], errors='coerce').fillna(0)
+        df[column] = pd.Series(pd.to_numeric(df[column], errors='coerce')).fillna(0)
 
     df['Vị trí'] = df['slot_id'].apply(normalize_slot)
 
@@ -1089,8 +1084,7 @@ def login_ui():
                         components.html(f"<script>document.cookie = 'dashboard_token={token}; path=/; max-age=86400';</script>", height=0)
                         st.session_state.authenticated = True
                         if hasattr(st, 'rerun'): st.rerun()
-                        # pyrefly: ignore [missing-attribute]
-                        else: st.experimental_rerun()
+                        else: st.rerun()
                     else:
                         st.error("Tên đăng nhập hoặc mật khẩu không đúng.")
                 except DatabaseError as e:
@@ -1114,8 +1108,7 @@ def logout():
     if hasattr(st, 'rerun'):
         st.rerun()
     else:
-        # pyrefly: ignore [missing-attribute]
-        st.experimental_rerun()
+        st.rerun()
 
 # --- Pages ---
 
@@ -1124,8 +1117,7 @@ def page_overview(df, state, display_mode):
     with c1:
         st.header("TỔNG QUAN HỆ THỐNG")
         baseline_dt = normalize_timestamp(state.get('reporting_baseline', '2000-01-01T00:00:00'))
-        # pyrefly: ignore [missing-attribute]
-        baseline_str = baseline_dt.strftime('%H:%M:%S - %d/%m/%Y') if pd.notna(baseline_dt) else "Bắt đầu"
+        baseline_str = baseline_dt.strftime('%H:%M:%S - %d/%m/%Y') if isinstance(baseline_dt, datetime) else "Bắt đầu"
             
         show_legacy = state.get("show_legacy_data", False)
         legacy_txt = "(Hiển thị toàn bộ lịch sử)" if show_legacy else f"Phiên báo cáo bắt đầu: {baseline_str}"
@@ -1133,8 +1125,7 @@ def page_overview(df, state, display_mode):
     with c2:
         if st.button("🔄 Làm mới ngay", use_container_width=True):
             if hasattr(st, 'rerun'): st.rerun()
-            # pyrefly: ignore [missing-attribute]
-            else: st.experimental_rerun()
+            else: st.rerun()
             
     # Calculate KPIs
     if df.empty:
@@ -1302,8 +1293,7 @@ def page_active(df):
         formatted.append({
             "Vị trí": row['Vị trí'],
             "Nguồn": row['input_mode'],
-            # pyrefly: ignore [missing-attribute]
-            "Giờ vào": gv.strftime('%H:%M:%S %d/%m/%Y') if pd.notna(gv) else "Chưa có dữ liệu",
+            "Giờ vào": gv.strftime('%H:%M:%S %d/%m/%Y') if isinstance(gv, datetime) else "Chưa có dữ liệu",
             "Thời gian đã đỗ": duration_str,
             "Tạm tính": format_vnd(fee),
             "Trạng thái": "Đang đỗ"
@@ -1329,10 +1319,8 @@ def page_history(df):
         formatted.append({
             "Vị trí": row['Vị trí'],
             "Nguồn": row['input_mode'],
-            # pyrefly: ignore [missing-attribute]
-            "Giờ vào": normalize_timestamp(row.get('gio_vao')).strftime('%H:%M:%S %d/%m/%Y') if pd.notna(normalize_timestamp(row.get('gio_vao'))) else "Chưa có dữ liệu",
-            # pyrefly: ignore [missing-attribute]
-            "Giờ ra": normalize_timestamp(row.get('gio_ra')).strftime('%H:%M:%S %d/%m/%Y') if pd.notna(normalize_timestamp(row.get('gio_ra'))) else "Chưa có dữ liệu",
+            "Giờ vào": gv.strftime('%H:%M:%S %d/%m/%Y') if isinstance((gv := normalize_timestamp(row.get('gio_vao'))), datetime) else "Chưa có dữ liệu",
+            "Giờ ra": gr.strftime('%H:%M:%S %d/%m/%Y') if isinstance((gr := normalize_timestamp(row.get('gio_ra'))), datetime) else "Chưa có dữ liệu",
             "Thời gian đỗ": f"{row['so_phut']} phút" if pd.notnull(row['so_phut']) else "---",
             "Phí đã thu": format_vnd(row['thanh_tien']),
         })
@@ -1423,8 +1411,8 @@ def view_weekly(df):
     
     # Calculate Monday to Sunday
     idx = (selected_date.weekday()) % 7
-    monday = selected_date - pd.Timedelta(days=idx)
-    sunday = monday + pd.Timedelta(days=6)
+    monday = selected_date - timedelta(days=idx)
+    sunday = monday + timedelta(days=6)
     
     start_dt = datetime.combine(monday, time.min).replace(tzinfo=VN_TZ)
     end_dt = datetime.combine(sunday, time.max).replace(tzinfo=VN_TZ)
@@ -1445,7 +1433,7 @@ def view_weekly(df):
         
     days_data = []
     for i in range(7):
-        curr_day = monday + pd.Timedelta(days=i)
+        curr_day = monday + timedelta(days=i)
         d_start = datetime.combine(curr_day, time.min).replace(tzinfo=VN_TZ)
         d_end = datetime.combine(curr_day, time.max).replace(tzinfo=VN_TZ)
         
@@ -1506,7 +1494,7 @@ def view_monthly(df):
         next_month = selected_date.replace(year=selected_date.year+1, month=1, day=1)
     else:
         next_month = selected_date.replace(month=selected_date.month+1, day=1)
-    end_dt = datetime.combine(next_month - pd.Timedelta(days=1), time.max).replace(tzinfo=VN_TZ)
+    end_dt = datetime.combine(next_month - timedelta(days=1), time.max).replace(tzinfo=VN_TZ)
     
     month_mask = df['gio_vao'].notna() & df['gio_vao'].between(start_dt, end_dt, inclusive='both')
     m_df = df.loc[month_mask].copy()
@@ -1551,8 +1539,7 @@ def page_settings(state):
     if new_source != st.session_state.source_filter:
         st.session_state.source_filter = new_source
         if hasattr(st, 'rerun'): st.rerun()
-        # pyrefly: ignore [missing-attribute]
-        else: st.experimental_rerun()
+        else: st.rerun()
         
     st.divider()
     
@@ -1579,8 +1566,7 @@ def page_settings(state):
             save_dashboard_state(state)
             st.success("Đã đặt mốc báo cáo mới! Tải lại trang sau 2 giây...")
             if hasattr(st, 'rerun'): st.rerun()
-            # pyrefly: ignore [missing-attribute]
-            else: st.experimental_rerun()
+            else: st.rerun()
             
     with col2:
         if st.button("Xem toàn bộ lịch sử", type="secondary" if not show_legacy else "primary"):
@@ -1588,16 +1574,14 @@ def page_settings(state):
             save_dashboard_state(state)
             st.success("Đã bật xem toàn bộ lịch sử.")
             if hasattr(st, 'rerun'): st.rerun()
-            # pyrefly: ignore [missing-attribute]
-            else: st.experimental_rerun()
+            else: st.rerun()
             
         if show_legacy and st.button("Tắt xem lịch sử (Về ca hiện tại)"):
             state['show_legacy_data'] = False
             save_dashboard_state(state)
             st.success("Đã tắt xem lịch sử.")
             if hasattr(st, 'rerun'): st.rerun()
-            # pyrefly: ignore [missing-attribute]
-            else: st.experimental_rerun()
+            else: st.rerun()
 
 def main_app():
     state = load_dashboard_state()
@@ -1614,8 +1598,7 @@ def main_app():
             if st.button("<<<", key="btn_close_panel"):
                 st.session_state.left_panel_open = False
                 if hasattr(st, 'rerun'): st.rerun()
-                # pyrefly: ignore [missing-attribute]
-                else: st.experimental_rerun()
+                else: st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
             
             st.title("🅿️ Dashboard")
@@ -1631,8 +1614,7 @@ def main_app():
                 if st.button(opt, type=btn_type, use_container_width=True):
                     st.session_state.current_selection = opt
                     if hasattr(st, 'rerun'): st.rerun()
-                    # pyrefly: ignore [missing-attribute]
-                    else: st.experimental_rerun()
+                    else: st.rerun()
                     
             st.divider()
             
@@ -1641,16 +1623,14 @@ def main_app():
             if auto_ref != st.session_state.auto_refresh:
                 st.session_state.auto_refresh = auto_ref
                 if hasattr(st, 'rerun'): st.rerun()
-                # pyrefly: ignore [missing-attribute]
-                else: st.experimental_rerun()
+                else: st.rerun()
                 
         else:
             # Closed state
             if st.button(">>>", key="btn_open_panel"):
                 st.session_state.left_panel_open = True
                 if hasattr(st, 'rerun'): st.rerun()
-                # pyrefly: ignore [missing-attribute]
-                else: st.experimental_rerun()
+                else: st.rerun()
 
     with col_main:
         df, display_mode = fetch_and_prepare_data(state, st.session_state.source_filter)
@@ -1673,8 +1653,7 @@ def main_app():
             import time
             time.sleep(3)
             if hasattr(st, 'rerun'): st.rerun()
-            # pyrefly: ignore [missing-attribute]
-            else: st.experimental_rerun()
+            else: st.rerun()
 
 if __name__ == "__main__":
     try:
@@ -1683,8 +1662,7 @@ if __name__ == "__main__":
             if st.button("THỬ KẾT NỐI LẠI"):
                 st.cache_resource.clear()
                 if hasattr(st, 'rerun'): st.rerun()
-                # pyrefly: ignore [missing-attribute]
-                else: st.experimental_rerun()
+                else: st.rerun()
             st.stop()
 
         if not st.session_state.authenticated:

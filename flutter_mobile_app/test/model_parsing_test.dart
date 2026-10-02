@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_parking_app/models/slot_model.dart';
 import 'package:smart_parking_app/models/session_model.dart';
+import 'package:smart_parking_app/repositories/parking_repository.dart';
 import 'package:smart_parking_app/utils/helpers.dart';
 
 void main() {
@@ -30,5 +31,32 @@ void main() {
   test('Vietnamese currency format is compact', () {
     expect(formatCurrency(450000), '450.000₫');
     expect(formatCurrency(null), 'Chưa có');
+  });
+
+  test('live snapshot maps detector regions and replaces stale occupancy', () {
+    final occupiedSnapshot = parseSlotsSnapshotData({
+      'type': 'parking.snapshot',
+      'slots': [
+        for (var index = 1; index <= 9; index++)
+          {
+            'slot_id': index,
+            'status': index == 1 || index == 4 ? 'OCCUPIED' : 'EMPTY',
+          },
+      ],
+    });
+    expect(
+      occupiedSnapshot.where((slot) => slot.isOccupied).map((slot) => slot.id),
+      containsAll(<String>['S01', 'S04']),
+    );
+    expect(occupiedSnapshot.where((slot) => slot.isOccupied), hasLength(2));
+
+    final emptySnapshot = parseSlotsSnapshotData({
+      'slots': [
+        for (var index = 1; index <= 9; index++)
+          {'slot_id': index, 'status': 'EMPTY'},
+      ],
+    });
+    expect(emptySnapshot.where((slot) => slot.isOccupied), isEmpty);
+    expect(emptySnapshot.where((slot) => slot.isEmpty), hasLength(9));
   });
 }
