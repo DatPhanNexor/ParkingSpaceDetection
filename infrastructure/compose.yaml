@@ -300,6 +300,12 @@ services:
 
   parking-billing-service:
     <<: *backend-common
+    environment:
+      <<: *backend-environment
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER:-admin}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-admin}
     command:
       - uvicorn
       - services.parking_billing_service.main:app
