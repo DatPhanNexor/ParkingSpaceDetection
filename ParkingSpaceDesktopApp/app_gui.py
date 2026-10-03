@@ -11,6 +11,10 @@ import platform
 import subprocess
 import sys
 import threading
+import requests
+import json
+from datetime import datetime, timezone
+
 import tkinter as tk
 import time
 from urllib.parse import urlparse
@@ -233,6 +237,11 @@ class ParkingSpaceDesktopApp(ctk.CTkFrame):
             self._log("Parking map not loaded. Vehicle count mode only.")
         for line in self.engine.runtime_path_report():
             self._log(line)
+            
+        try:
+            self._sync_live_map(None)
+        except Exception:
+            pass
 
     def after(self, ms, func=None, *args):
         # pyrefly: ignore [bad-argument-type]
@@ -1166,6 +1175,8 @@ class ParkingSpaceDesktopApp(ctk.CTkFrame):
             self.latest_image_path = out.image_path or ""
             self.latest_video_path = ""
             self._put_frame(out.rendered_frame)
+            self._sync_live_map(out.visual)
+
             self.after(0, self._update_stats, out.visual) # pyright: ignore[reportArgumentType]
             self.after(0, lambda: self.status_label.configure(text="Completed")) # pyright: ignore[reportArgumentType]
         except Exception as exc:
@@ -1354,6 +1365,8 @@ class ParkingSpaceDesktopApp(ctk.CTkFrame):
                 self.latest_visual = last_visual
                 self.latest_rendered = last_rendered
                 self._post_ui(self._update_stats, last_visual)
+                self._sync_live_map(last_visual)
+
                 self._post_ui(self._update_billing, result, mode)
                 maybe_save_history(last_visual)
                 return True
@@ -1616,7 +1629,27 @@ class ParkingSpaceDesktopApp(ctk.CTkFrame):
         except Exception as exc:
             self._log(f"Preview error: {exc}")
 
+
+    def _sync_live_map(self, visual: Optional[VisualState]):
+        def background_task():
+            try:
+                slots = {f"S0{i}": {"slot_id": f"S0{i}", "status": "EMPTY"} for i in range(1, 10)}
+                if visual and visual.slot_states:
+                    for s in visual.slot_states:
+                        if 1 <= s.slot_id <= 9:
+                            sid = f"S0{s.slot_id}"
+                            slots[sid]["status"] = str(s.state).upper()
+                payload = {
+                    "slots": list(slots.values()),
+                    "observed_at": datetime.now(timezone.utc).isoformat()
+                }
+                requests.post("http://127.0.0.1:8005/api/v1/sync", json=payload, timeout=0.5)
+            except Exception:
+                pass
+        threading.Thread(target=background_task, daemon=True).start()
+
     def _update_stats(self, visual: VisualState):
+
         stats = visual.stats
         self.stat_empty.configure(text=str(stats.available_spaces))
         self.stat_occ.configure(text=f"{stats.occupied_spaces}/{stats.total_spaces}")

@@ -1,13 +1,14 @@
-import pytest
-
+﻿import pytest
 pytest.importorskip("aiomysql")
+from pydantic import ValidationError
+from datetime import datetime, timezone
 
 from services.desktop_sync_service.main import (
     SLOT_IDS,
     normalize_slot_id,
-    snapshot_from_desktop_rows,
+    SlotSnapshot,
+    OccupancySnapshot,
 )
-
 
 def test_detector_region_mapping_is_canonical():
     assert normalize_slot_id(1) == "S01"
@@ -15,23 +16,26 @@ def test_detector_region_mapping_is_canonical():
     assert normalize_slot_id(9) == "S09"
     assert normalize_slot_id(10) is None
 
+def test_snapshot_requires_9_slots():
+    with pytest.raises(ValidationError):
+        OccupancySnapshot(slots=[
+            SlotSnapshot(slot_id="S01", status="OCCUPIED"),
+            SlotSnapshot(slot_id="S02", status="EMPTY")
+        ])
 
-def test_desktop_rows_replace_all_slots_and_clear_empty_slots():
-    snapshot = snapshot_from_desktop_rows(
-        [
-            ("run-1", "tx-1", 1, "2026-10-01T10:00:00Z", None, None),
-            ("run-1", "tx-4", "S04", "2026-10-01T10:00:00Z", None, None),
-        ]
-    )
-    occupied = {slot.slot_id for slot in snapshot.slots if slot.status == "OCCUPIED"}
-    assert occupied == {"S01", "S04"}
+def test_snapshot_clears_stale_data():
+    slots = []
+    for i in range(1, 10):
+        sid = f"S0{i}"
+        status = "OCCUPIED" if i in [1, 4] else "EMPTY"
+        slots.append(SlotSnapshot(slot_id=sid, status=status))
+    
+    snapshot = OccupancySnapshot(slots=slots, observed_at=datetime.now(timezone.utc).isoformat())
     assert len(snapshot.slots) == 9
+    
+    occupied = {s.slot_id for s in snapshot.slots if s.status == "OCCUPIED"}
+    assert occupied == {"S01", "S04"}
+    
+    empty = {s.slot_id for s in snapshot.slots if s.status == "EMPTY"}
+    assert empty == {"S02", "S03", "S05", "S06", "S07", "S08", "S09"}
 
-    empty_snapshot = snapshot_from_desktop_rows(
-        [
-            ("run-1", "tx-1", 1, "2026-10-01T10:00:00Z", "2026-10-01T10:05:00Z", None),
-            ("run-1", "tx-4", 4, "2026-10-01T10:00:00Z", "2026-10-01T10:05:00Z", None),
-        ]
-    )
-    assert {slot.slot_id for slot in empty_snapshot.slots if slot.status == "OCCUPIED"} == set()
-    assert {slot.slot_id for slot in empty_snapshot.slots} == set(SLOT_IDS)

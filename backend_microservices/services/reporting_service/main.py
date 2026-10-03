@@ -52,7 +52,7 @@ async def _build_slots_snapshot() -> List[Dict[str, Any]]:
         state = await redis_client.hgetall(f"{LIVE_SLOT_KEY_PREFIX}:{slot_id}")
         slots.append({
             "slot_id": slot_id,
-            "status": state.get("status", "UNKNOWN") if state else "UNKNOWN",
+            "status": state.get("status", "EMPTY") if state else "EMPTY",
             "session_id": state.get("session_id") if state else None,
             "started_at": state.get("started_at") if state else None,
             "updated_at": state.get("updated_at") if state else None,
@@ -127,7 +127,7 @@ async def get_slot(slot_id: str, current_user: dict = Depends(get_current_user))
     state = await redis_client.hgetall(f"{LIVE_SLOT_KEY_PREFIX}:{slot_id}")
     return {
         "slot_id": slot_id,
-        "status": state.get("status", "UNKNOWN") if state else "UNKNOWN",
+        "status": state.get("status", "EMPTY") if state else "EMPTY",
         "session_id": state.get("session_id") if state else None,
         "started_at": state.get("started_at") if state else None,
         "updated_at": state.get("updated_at") if state else None,
