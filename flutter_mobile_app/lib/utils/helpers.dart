@@ -53,9 +53,52 @@ String formatDate(DateTime? value) {
 DateTime? tryParseDate(dynamic value) {
   if (value == null) return null;
   if (value is DateTime) return value;
+
   final text = value.toString().trim();
   if (text.isEmpty) return null;
-  return DateTime.tryParse(text);
+  if (text == '0' || text == '0.0') return null;
+
+  // Try parsing as integer (Unix timestamp)
+  final asInt = int.tryParse(text);
+  if (asInt != null) {
+    // If it's smaller than 10 billion, it's likely seconds.
+    // If it's around 1.7 billion, it's 2024.
+    // If it's less than 31536000 (1 year), it's probably wrong or just very early 1970.
+    if (asInt < 31536000) return null; // Reject early 1970s as likely errors
+
+    if (asInt < 10000000000) {
+      return DateTime.fromMillisecondsSinceEpoch(
+        asInt * 1000,
+        isUtc: true,
+      ).toLocal();
+    }
+    return DateTime.fromMillisecondsSinceEpoch(asInt, isUtc: true).toLocal();
+  }
+
+  // Try parsing as double
+  final asDouble = double.tryParse(text);
+  if (asDouble != null) {
+    if (asDouble < 31536000) return null;
+    if (asDouble < 10000000000) {
+      return DateTime.fromMillisecondsSinceEpoch(
+        (asDouble * 1000).toInt(),
+        isUtc: true,
+      ).toLocal();
+    }
+    return DateTime.fromMillisecondsSinceEpoch(
+      asDouble.toInt(),
+      isUtc: true,
+    ).toLocal();
+  }
+
+  final parsed = DateTime.tryParse(text);
+  if (parsed != null) {
+    // If the parsed date is before 2000, it's likely an error (like 1970)
+    if (parsed.year < 2000) return null;
+    return parsed.toLocal();
+  }
+
+  return null;
 }
 
 String timeAgo(DateTime? value) {

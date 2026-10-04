@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+
+from shared.events import get_publisher, EventEnvelope, DetectionCompletedPayload, SlotStatus
+import uuid
 from pydantic import BaseModel, Field
 
 from shared.database import get_db_connection, redis_client
@@ -49,17 +52,64 @@ async def publish_snapshot(snapshot: OccupancySnapshot) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="Snapshot must contain each slot exactly once")
 
     observed_at = snapshot.observed_at or datetime.now(timezone.utc).isoformat()
+    
+    # 1. Compare with current Redis state and publish events
+    publisher = await get_publisher()
+    
+    for slot_id in SLOT_IDS:
+        new_status = normalized[slot_id].status
+        
+        # Read current status
+        current_state = await redis_client.hgetall(f"{LIVE_KEY_PREFIX}:{slot_id}")
+        old_status = current_state.get("status", "EMPTY")
+        
+        if old_status != new_status:
+            # Emit detection.completed event
+            payload = DetectionCompletedPayload(
+                slot_id=slot_id,
+                status=SlotStatus.OCCUPIED if new_status == "OCCUPIED" else SlotStatus.EMPTY,
+                confidence=1.0,
+                measurement_valid=True,
+                board_lock_valid=True,
+                camera_ok=True,
+                status_reason=f"Transitioned from {old_status} to {new_status}",
+                stable_frame_count=5,
+                observed_at_utc=observed_at,
+                source_elapsed_seconds=0.0,
+                source_type="desktop-droidcam"
+            )
+            event = EventEnvelope(
+                event_id=str(uuid.uuid4()),
+                event_type="detection.completed",
+                source="desktop_sync_service",
+                payload=payload.model_dump()
+            )
+            await publisher.publish(event, routing_key="detection.completed")
+
+    # 2. Update Redis
     pipe = redis_client.pipeline(transaction=True)
     for slot_id in SLOT_IDS:
         slot = normalized[slot_id]
-        pipe.hset(f"{LIVE_KEY_PREFIX}:{slot_id}", mapping={
+        
+        # Read current state to preserve session info if we are just pinging the same status
+        current_state = await redis_client.hgetall(f"{LIVE_KEY_PREFIX}:{slot_id}")
+        
+        mapping_dict = {
             "status": slot.status,
-            "session_id": slot.session_id or "",
-            "started_at": slot.started_at or "",
             "updated_at": slot.updated_at or observed_at,
             "observed_at": observed_at,
             "source": "desktop-droidcam",
-        })
+        }
+        
+        if slot.status == "OCCUPIED":
+            # Preserve existing session_id and started_at if not provided by snapshot
+            mapping_dict["session_id"] = slot.session_id or current_state.get("session_id", "")
+            mapping_dict["started_at"] = slot.started_at or current_state.get("started_at", "")
+        else:
+            mapping_dict["session_id"] = ""
+            mapping_dict["started_at"] = ""
+
+        pipe.hset(f"{LIVE_KEY_PREFIX}:{slot_id}", mapping=mapping_dict)
         pipe.expire(f"{LIVE_KEY_PREFIX}:{slot_id}", 15)
     pipe.hset(
         LIVE_META_KEY,

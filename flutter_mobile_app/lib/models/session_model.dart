@@ -1,6 +1,8 @@
 import '../utils/helpers.dart';
 import 'slot_model.dart';
 
+import 'dart:math';
+
 class ParkingSession {
   final String id;
   final String slotId;
@@ -64,6 +66,20 @@ class ParkingSession {
   String get shortId {
     if (id.length <= 12) return id;
     return '${id.substring(0, 12)}...';
+  }
+
+  num? get displayFeeVnd {
+    if (feeVnd != null) return feeVnd;
+    if (!isActive || startTime == null) return null;
+
+    final durationSec = max(0, liveDuration.inSeconds);
+    const hourlyRate = 20000.0;
+    const rounding = 5000.0;
+    const minFee = 5000.0;
+
+    final rawFee = (durationSec / 3600.0) * hourlyRate;
+    final rounded = (rawFee / rounding).ceil() * rounding;
+    return max(minFee, rounded);
   }
 }
 

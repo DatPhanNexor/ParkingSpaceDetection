@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/constants.dart';
 import '../core/theme.dart';
 import '../models/session_model.dart';
 import '../providers/dashboard_provider.dart';
 import '../utils/helpers.dart';
+import '../repositories/auth_repository.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -16,7 +16,8 @@ class HistoryScreen extends ConsumerStatefulWidget {
 
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   int _filter = 0;
-  String? _slotId;
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = {};
 
   @override
   void initState() {
@@ -24,23 +25,83 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     Future.microtask(() => ref.read(historyProvider.notifier).fetch());
   }
 
+  List<ParkingSession> _filtered(List<ParkingSession> raw) {
+    if (_filter == 0) return raw;
+    final now = DateTime.now();
+    return raw.where((s) {
+      if (s.endTime == null) return false;
+      final diff = now.difference(s.endTime!);
+      if (_filter == 1) return diff.inDays == 0 && now.day == s.endTime!.day;
+      if (_filter == 2) return diff.inDays <= 7;
+      return true;
+    }).toList();
+  }
+
+  void _toggleSelection(String id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _selectAll(List<ParkingSession> visibleSessions) {
+    setState(() {
+      if (_selectedIds.length == visibleSessions.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds.addAll(visibleSessions.map((e) => e.id));
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(historyProvider);
     final sessions = _filtered(state.sessions);
+    final user = ref.watch(authStateProvider).value;
+    final isAdmin = user?.isAdmin == true;
+
+    // Filter out selections that are no longer visible
+    if (_selectionMode) {
+      final visibleIds = sessions.map((e) => e.id).toSet();
+      _selectedIds.retainWhere((id) => visibleIds.contains(id));
+    }
 
     return Scaffold(
       backgroundColor: AppTheme.navy,
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: () => ref.read(historyProvider.notifier).fetch(),
+          onRefresh: () async {
+            setState(() {
+              _selectionMode = false;
+              _selectedIds.clear();
+            });
+            await ref.read(historyProvider.notifier).fetch();
+          },
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                  child: _Header(count: sessions.length),
+                  child: _Header(
+                    count: sessions.length,
+                    isAdmin: isAdmin,
+                    selectionMode: _selectionMode,
+                    allSelected:
+                        _selectedIds.length == sessions.length &&
+                        sessions.isNotEmpty,
+                    onToggleSelectionMode: () {
+                      setState(() {
+                        _selectionMode = !_selectionMode;
+                        _selectedIds.clear();
+                      });
+                    },
+                    onSelectAll: () => _selectAll(sessions),
+                  ),
                 ),
               ),
               SliverToBoxAdapter(
@@ -51,10 +112,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               ),
               if (state.isLoading && state.sessions.isEmpty)
                 const SliverFillRemaining(
+                  hasScrollBody: false,
                   child: Center(child: CircularProgressIndicator()),
                 )
               else if (state.error != null && state.sessions.isEmpty)
                 SliverFillRemaining(
+                  hasScrollBody: false,
                   child: _ErrorPanel(
                     message: friendlyError(Exception(state.error!)),
                     onRetry: () => ref.read(historyProvider.notifier).fetch(),
@@ -68,53 +131,188 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               else
                 SliverList.builder(
                   itemCount: sessions.length,
-                  itemBuilder: (context, index) => Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-                    child: _HistoryCard(session: sessions[index]),
-                  ),
+                  itemBuilder: (context, index) {
+                    final session = sessions[index];
+                    final isSelected = _selectedIds.contains(session.id);
+
+                    Widget cardWidget = Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                      child: Row(
+                        children: [
+                          if (_selectionMode) ...[
+                            Checkbox(
+                              value: isSelected,
+                              onChanged: (_) => _toggleSelection(session.id),
+                              activeColor: AppTheme.red,
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: _selectionMode
+                                  ? () => _toggleSelection(session.id)
+                                  : null,
+                              child: _HistoryCard(session: session),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+
+                    if (isAdmin && !_selectionMode) {
+                      cardWidget = Dismissible(
+                        key: Key(session.id),
+                        direction: DismissDirection.endToStart,
+                        background: Container(
+                          margin: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 20),
+                          decoration: BoxDecoration(
+                            color: AppTheme.red,
+                            borderRadius: BorderRadius.circular(
+                              AppTheme.radiusMd,
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.delete_outline, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Xóa',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        confirmDismiss: (direction) async {
+                          return await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Xóa lịch sử đỗ xe?'),
+                              content: Text(
+                                'Bạn có chắc muốn xóa phiên ${session.slotId} này? Thao tác này không thể hoàn tác.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('Hủy'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: AppTheme.red,
+                                  ),
+                                  child: const Text('Xóa'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                        onDismissed: (direction) async {
+                          try {
+                            await ref
+                                .read(historyProvider.notifier)
+                                .deleteSession(session.id);
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Không thể xóa dữ liệu. Vui lòng thử lại.',
+                                  ),
+                                ),
+                              );
+                              ref
+                                  .read(historyProvider.notifier)
+                                  .fetch(silent: true);
+                            }
+                          }
+                        },
+                        child: cardWidget,
+                      );
+                    }
+                    return cardWidget;
+                  },
                 ),
-              const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(20, 8, 20, 24),
-                  child: Text(
-                    'Bộ lọc được áp dụng trên 50 giao dịch mới nhất do backend trả về.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ),
             ],
           ),
         ),
       ),
+      bottomNavigationBar: _selectionMode
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: ElevatedButton.icon(
+                  onPressed: _selectedIds.isEmpty
+                      ? null
+                      : () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: Text(
+                                'Xóa ${_selectedIds.length} lịch sử đã chọn?',
+                              ),
+                              content: const Text(
+                                'Bạn có chắc muốn xóa các phiên đã chọn? Thao tác này không thể hoàn tác.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('Hủy'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: AppTheme.red,
+                                  ),
+                                  child: Text('Xóa ${_selectedIds.length}'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) {
+                            try {
+                              await ref
+                                  .read(historyProvider.notifier)
+                                  .deleteBatchSessions(_selectedIds.toList());
+                              if (context.mounted) {
+                                setState(() {
+                                  _selectionMode = false;
+                                  _selectedIds.clear();
+                                });
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Không thể xóa dữ liệu. Vui lòng thử lại.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+                          }
+                        },
+                  icon: const Icon(Icons.delete_outline),
+                  label: Text('Xóa ${_selectedIds.length}'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.red,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: AppTheme.red.withValues(
+                      alpha: 0.3,
+                    ),
+                    minimumSize: const Size.fromHeight(50),
+                  ),
+                ),
+              ),
+            )
+          : null,
     );
-  }
-
-  List<ParkingSession> _filtered(List<ParkingSession> input) {
-    final now = DateTime.now();
-    Iterable<ParkingSession> result = input;
-    if (_filter == 1) {
-      result = result.where((item) {
-        final start = item.startTime;
-        return start != null &&
-            start.year == now.year &&
-            start.month == now.month &&
-            start.day == now.day;
-      });
-    } else if (_filter == 2) {
-      final sevenDaysAgo = now.subtract(const Duration(days: 7));
-      result = result.where((item) {
-        final start = item.startTime;
-        return start != null && start.isAfter(sevenDaysAgo);
-      });
-    }
-    if (_slotId != null) {
-      result = result.where((item) => item.slotId == _slotId);
-    }
-    return result.toList();
   }
 
   Widget _buildFilters() {
@@ -128,38 +326,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               _FilterChip(
                 label: 'Tất cả',
                 selected: _filter == 0,
-                onTap: () => setState(() => _filter = 0),
+                onTap: () {
+                  setState(() => _filter = 0);
+                },
               ),
               const SizedBox(width: 8),
               _FilterChip(
                 label: 'Hôm nay',
                 selected: _filter == 1,
-                onTap: () => setState(() => _filter = 1),
+                onTap: () {
+                  setState(() => _filter = 1);
+                },
               ),
               const SizedBox(width: 8),
               _FilterChip(
                 label: '7 ngày',
                 selected: _filter == 2,
-                onTap: () => setState(() => _filter = 2),
-              ),
-              const SizedBox(width: 8),
-              PopupMenuButton<String?>(
-                tooltip: 'Lọc theo vị trí',
-                color: AppTheme.cardLight,
-                onSelected: (value) => setState(() => _slotId = value),
-                itemBuilder: (context) => [
-                  const PopupMenuItem<String?>(
-                    value: null,
-                    child: Text('Tất cả vị trí'),
-                  ),
-                  for (final id in AppConstants.slotIds)
-                    PopupMenuItem<String?>(value: id, child: Text(id)),
-                ],
-                child: _FilterChip(
-                  label: _slotId == null ? 'Vị trí' : _slotId!,
-                  selected: _slotId != null,
-                  onTap: () {},
-                ),
+                onTap: () {
+                  setState(() => _filter = 2);
+                },
               ),
             ],
           ),
@@ -171,8 +356,20 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
 class _Header extends StatelessWidget {
   final int count;
+  final bool isAdmin;
+  final bool selectionMode;
+  final bool allSelected;
+  final VoidCallback onToggleSelectionMode;
+  final VoidCallback onSelectAll;
 
-  const _Header({required this.count});
+  const _Header({
+    required this.count,
+    required this.isAdmin,
+    required this.selectionMode,
+    required this.allSelected,
+    required this.onToggleSelectionMode,
+    required this.onSelectAll,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -180,11 +377,11 @@ class _Header extends StatelessWidget {
       children: [
         const Icon(Icons.history, color: AppTheme.cyan, size: 24),
         const SizedBox(width: 10),
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 'Lịch sử đỗ xe',
                 style: TextStyle(
                   color: AppTheme.textPrimary,
@@ -192,21 +389,54 @@ class _Header extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                 ),
               ),
-              SizedBox(height: 3),
+              const SizedBox(height: 3),
               Text(
                 'Giao dịch đã hoàn tất',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),
         ),
-        Text(
-          '$count phiên',
-          style: const TextStyle(
-            color: AppTheme.textSecondary,
-            fontWeight: FontWeight.w700,
+        if (selectionMode) ...[
+          TextButton(
+            onPressed: onSelectAll,
+            child: Text(
+              allSelected ? 'Bỏ chọn' : 'Chọn tất cả',
+              style: const TextStyle(color: AppTheme.accent),
+            ),
           ),
-        ),
+          TextButton(
+            onPressed: onToggleSelectionMode,
+            child: const Text(
+              'Hủy',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ),
+        ] else if (isAdmin && count > 0) ...[
+          TextButton(
+            onPressed: onToggleSelectionMode,
+            child: const Text('Chọn', style: TextStyle(color: AppTheme.accent)),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$count phiên',
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ] else ...[
+          Text(
+            '$count phiên',
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ],
     );
   }

@@ -7,6 +7,7 @@ import '../core/theme.dart';
 import '../models/session_model.dart';
 import '../providers/dashboard_provider.dart';
 import '../utils/helpers.dart';
+import '../repositories/auth_repository.dart';
 import '../widgets/slot_grid.dart';
 
 class ParkingMapScreen extends ConsumerWidget {
@@ -14,7 +15,10 @@ class ParkingMapScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final sessions = ref.watch(activeSessionsProvider);
+    final user = ref.watch(authStateProvider).value;
+    final isAdmin = user?.isAdmin == true;
+
+    final sessions = ref.watch(filteredActiveSessionsProvider);
     final slots = ref.watch(slotsProvider);
     return Scaffold(
       backgroundColor: AppTheme.navy,
@@ -45,10 +49,12 @@ class ParkingMapScreen extends ConsumerWidget {
               ),
               if (sessions.isLoading && sessions.sessions.isEmpty)
                 const SliverFillRemaining(
+                  hasScrollBody: false,
                   child: Center(child: CircularProgressIndicator()),
                 )
               else if (sessions.error != null && sessions.sessions.isEmpty)
                 SliverFillRemaining(
+                  hasScrollBody: false,
                   child: _ErrorPanel(
                     message: friendlyError(Exception(sessions.error!)),
                     onRetry: () =>
@@ -56,14 +62,91 @@ class ParkingMapScreen extends ConsumerWidget {
                   ),
                 )
               else if (sessions.sessions.isEmpty)
-                const SliverFillRemaining(child: _EmptyPanel())
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _EmptyPanel(),
+                )
               else
                 SliverList.builder(
                   itemCount: sessions.sessions.length,
-                  itemBuilder: (context, index) => Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-                    child: _SessionCard(session: sessions.sessions[index]),
-                  ),
+                  itemBuilder: (context, index) {
+                    final session = sessions.sessions[index];
+                    final card = Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                      child: _SessionCard(session: session),
+                    );
+                    if (isAdmin) {
+                      return Dismissible(
+                        key: Key(session.id),
+                        direction: DismissDirection.endToStart,
+                        background: Container(
+                          margin: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 20),
+                          decoration: BoxDecoration(
+                            color: AppTheme.red,
+                            borderRadius: BorderRadius.circular(
+                              AppTheme.radiusMd,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.white,
+                          ),
+                        ),
+                        confirmDismiss: (direction) async {
+                          return await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Xóa phiên đang đỗ?'),
+                              content: const Text(
+                                'Bạn có chắc muốn xóa phiên này? Lịch sử đã hoàn tất không bị ảnh hưởng.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('Hủy'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: AppTheme.red,
+                                  ),
+                                  child: const Text('Xóa'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                        onDismissed: (direction) async {
+                          try {
+                            await ref
+                                .read(activeSessionsProvider.notifier)
+                                .deleteSession(session.id);
+                            if (context.mounted)
+                              ref
+                                  .read(activeSessionsProvider.notifier)
+                                  .fetch(silent: true);
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    e.toString().replaceAll('Exception: ', ''),
+                                  ),
+                                ),
+                              );
+                              ref
+                                  .read(activeSessionsProvider.notifier)
+                                  .fetch(silent: true);
+                            }
+                          }
+                        },
+                        child: card,
+                      );
+                    }
+                    return card;
+                  },
                 ),
               const SliverToBoxAdapter(child: SizedBox(height: 22)),
             ],
@@ -150,6 +233,7 @@ class _SessionCardState extends State<_SessionCard> {
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
+    final isPending = session.status == 'pending';
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -185,9 +269,9 @@ class _SessionCardState extends State<_SessionCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Xe đang đỗ',
-                      style: TextStyle(
+                    Text(
+                      isPending ? 'Đang tạo phiên...' : 'Xe đang đỗ',
+                      style: const TextStyle(
                         color: AppTheme.textPrimary,
                         fontWeight: FontWeight.w800,
                         fontSize: 16,
@@ -195,7 +279,9 @@ class _SessionCardState extends State<_SessionCard> {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      'Bắt đầu: ${formatDateTime(session.startTime)}',
+                      isPending
+                          ? 'Đang đồng bộ từ máy chủ'
+                          : 'Bắt đầu: ${formatDateTime(session.startTime)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -206,13 +292,20 @@ class _SessionCardState extends State<_SessionCard> {
                   ],
                 ),
               ),
-              Text(
-                formatDurationFull(session.liveDuration),
-                style: const TextStyle(
-                  color: AppTheme.cyan,
-                  fontWeight: FontWeight.w800,
+              if (!isPending)
+                Text(
+                  formatDurationFull(session.liveDuration),
+                  style: const TextStyle(
+                    color: AppTheme.cyan,
+                    fontWeight: FontWeight.w800,
+                  ),
+                )
+              else
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -221,7 +314,7 @@ class _SessionCardState extends State<_SessionCard> {
               Expanded(
                 child: _InfoTile(
                   label: 'Phí tạm tính',
-                  value: formatCurrency(session.feeVnd),
+                  value: formatCurrency(session.displayFeeVnd),
                 ),
               ),
               const SizedBox(width: 10),

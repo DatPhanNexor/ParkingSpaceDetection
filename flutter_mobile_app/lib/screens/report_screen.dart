@@ -47,10 +47,12 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               ),
               if (state.isLoading && state.summary == null)
                 const SliverFillRemaining(
+                  hasScrollBody: false,
                   child: Center(child: CircularProgressIndicator()),
                 )
               else if (state.error != null && state.summary == null)
                 SliverFillRemaining(
+                  hasScrollBody: false,
                   child: _ErrorPanel(
                     message: friendlyError(Exception(state.error!)),
                     onRetry: () => ref.read(reportProvider.notifier).fetchAll(),
@@ -100,6 +102,14 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                   ),
                 ),
               ],
+              if (widget.isAdmin)
+                if (widget.isAdmin)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                      child: _ResetShiftSection(state: state),
+                    ),
+                  ),
               const SliverToBoxAdapter(child: SizedBox(height: 24)),
             ],
           ),
@@ -550,4 +560,112 @@ double _maxValue(List<Map<String, dynamic>> items, String key) {
   return items
       .map((item) => asDouble(item[key]))
       .fold<double>(0, (a, b) => a > b ? a : b);
+}
+
+class _ResetShiftSection extends ConsumerWidget {
+  final ReportState state;
+
+  const _ResetShiftSection({required this.state});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    String shiftDisplay = 'Chưa thiết lập';
+    if (state.shiftStart != null) {
+      final local = state.shiftStart!.toLocal();
+      shiftDisplay =
+          '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}:${local.second.toString().padLeft(2, '0')} - ${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year}';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: _panelDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Thiết lập lại số liệu',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Ca hiện tại bắt đầu từ:',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            shiftDisplay,
+            style: const TextStyle(
+              color: AppTheme.accent,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: state.isLoading
+                  ? null
+                  : () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: AppTheme.card,
+                          title: const Text(
+                            'Bắt đầu ca mới?',
+                            style: TextStyle(color: AppTheme.textPrimary),
+                          ),
+                          content: const Text(
+                            'Nếu tiếp tục, số liệu của ca hiện tại sẽ bắt đầu lại từ 0.\nLịch sử và dữ liệu các ca trước không bị xóa.',
+                            style: TextStyle(color: AppTheme.textSecondary),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('Hủy'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              child: const Text(
+                                'Xác nhận',
+                                style: TextStyle(color: AppTheme.accent),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        ref.read(reportProvider.notifier).resetShift();
+                      }
+                    },
+              icon: state.isLoading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.restart_alt),
+              label: const Text('BẮT ĐẦU CA MỚI'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -15,10 +15,14 @@ class ReportingRepository {
 
   ReportingRepository(this._client);
 
-  Future<Map<String, dynamic>> getSummary() async {
+  Future<Map<String, dynamic>> getSummary({DateTime? since}) async {
     try {
+      final query = since != null
+          ? {'since': since.toUtc().toIso8601String()}
+          : null;
       final response = await _client.dio.get<Map<String, dynamic>>(
         AppConstants.reportSummaryUrl,
+        queryParameters: query,
       );
       return response.data ?? <String, dynamic>{};
     } on DioException catch (error) {
@@ -26,12 +30,12 @@ class ReportingRepository {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getRevenue() async {
-    return _getMapList(AppConstants.reportRevenueUrl);
+  Future<List<Map<String, dynamic>>> getRevenue({DateTime? since}) async {
+    return _getMapList(AppConstants.reportRevenueUrl, since: since);
   }
 
-  Future<List<Map<String, dynamic>>> getFrequency() async {
-    return _getMapList(AppConstants.reportFrequencyUrl);
+  Future<List<Map<String, dynamic>>> getFrequency({DateTime? since}) async {
+    return _getMapList(AppConstants.reportFrequencyUrl, since: since);
   }
 
   Future<List<Alert>> getAlerts() async {
@@ -50,9 +54,18 @@ class ReportingRepository {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _getMapList(String url) async {
+  Future<List<Map<String, dynamic>>> _getMapList(
+    String url, {
+    DateTime? since,
+  }) async {
     try {
-      final response = await _client.dio.get<dynamic>(url);
+      final query = since != null
+          ? {'since': since.toUtc().toIso8601String()}
+          : null;
+      final response = await _client.dio.get<dynamic>(
+        url,
+        queryParameters: query,
+      );
       final data = response.data;
       if (data is List<dynamic>) {
         return data.whereType<Map<String, dynamic>>().toList();

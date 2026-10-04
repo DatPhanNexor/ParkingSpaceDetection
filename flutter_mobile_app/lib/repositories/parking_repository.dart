@@ -21,6 +21,9 @@ class ParkingRepository {
       final response = await _client.dio.get<dynamic>(AppConstants.slotsUrl);
       return parseSlotsSnapshot(response.data);
     } on DioException catch (error) {
+      print(
+        'DIO ERROR: ${error.response?.statusCode} - ${error.response?.data}',
+      );
       throw ApiFailure.fromDio(error);
     }
   }
@@ -39,6 +42,9 @@ class ParkingRepository {
           .map(ParkingSession.fromJson)
           .toList();
     } on DioException catch (error) {
+      print(
+        'DIO ERROR: ${error.response?.statusCode} - ${error.response?.data}',
+      );
       throw ApiFailure.fromDio(error);
     }
   }
@@ -54,6 +60,63 @@ class ParkingRepository {
           .map(ParkingSession.fromJson)
           .toList();
     } on DioException catch (error) {
+      print(
+        'DIO ERROR: ${error.response?.statusCode} - ${error.response?.data}',
+      );
+      throw ApiFailure.fromDio(error);
+    }
+  }
+
+  Future<void> deleteActiveSession(String sessionId) async {
+    try {
+      await _client.dio.delete<dynamic>(
+        '${AppConstants.billingBaseUrl}/sessions/active/$sessionId',
+      );
+    } on DioException catch (error) {
+      print(
+        'DIO ERROR: ${error.response?.statusCode} - ${error.response?.data}',
+      );
+      throw ApiFailure.fromDio(error);
+    }
+  }
+
+  Future<void> clearAllActiveSessions() async {
+    try {
+      await _client.dio.delete<dynamic>(
+        '${AppConstants.billingBaseUrl}/sessions/active',
+      );
+    } on DioException catch (error) {
+      print(
+        'DIO ERROR: ${error.response?.statusCode} - ${error.response?.data}',
+      );
+      throw ApiFailure.fromDio(error);
+    }
+  }
+
+  Future<void> deleteHistorySession(String transactionId) async {
+    try {
+      await _client.dio.delete<dynamic>(
+        '${AppConstants.reportingBaseUrl}/sessions/history/$transactionId',
+      );
+    } on DioException catch (error) {
+      print(
+        'DIO ERROR: ${error.response?.statusCode} - ${error.response?.data}',
+      );
+      throw ApiFailure.fromDio(error);
+    }
+  }
+
+  Future<void> deleteBatchHistorySessions(List<String> transactionIds) async {
+    if (transactionIds.isEmpty) return;
+    try {
+      await _client.dio.delete<dynamic>(
+        '${AppConstants.reportingBaseUrl}/sessions/history',
+        data: {'transaction_ids': transactionIds},
+      );
+    } on DioException catch (error) {
+      print(
+        'DIO ERROR: ${error.response?.statusCode} - ${error.response?.data}',
+      );
       throw ApiFailure.fromDio(error);
     }
   }

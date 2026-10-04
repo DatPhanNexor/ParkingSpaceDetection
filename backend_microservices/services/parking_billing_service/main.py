@@ -7,6 +7,8 @@ import logging
 from contextlib import asynccontextmanager, suppress
 from typing import Optional
 
+from shared.security import require_role
+from fastapi import Depends
 from fastapi import FastAPI
 from pydantic_settings import BaseSettings
 import aio_pika
@@ -121,11 +123,24 @@ async def process_detection_event(event: EventEnvelope):
                     "updated_at": _utc_now_naive().isoformat(),
                 },
             )
+        elif not active_row and current_status == "OCCUPIED":
+            # Self-healing: DB says empty, but Redis says occupied (stale).
+            current_status = "EMPTY"
+            current_session = ""
+            await redis_client.hset(
+                state_key,
+                mapping={
+                    "status": "EMPTY",
+                    "session_id": "",
+                    "started_at": "",
+                    "updated_at": _utc_now_naive().isoformat(),
+                },
+            )
 
         if status == "OCCUPIED" and current_status == "EMPTY":
             session_id = str(uuid.uuid4())
             started_at_dt = _parse_event_time(payload.observed_at_utc or event.occurred_at)
-            started_at = started_at_dt.isoformat()
+            started_at = started_at_dt.replace(tzinfo=datetime.timezone.utc).isoformat()
 
             await redis_client.hset(
                 state_key,
@@ -162,7 +177,7 @@ async def process_detection_event(event: EventEnvelope):
 
         elif status == "EMPTY" and current_status == "OCCUPIED" and current_session:
             ended_at_dt = _parse_event_time(payload.observed_at_utc or event.occurred_at)
-            ended_at = ended_at_dt.isoformat()
+            ended_at = ended_at_dt.replace(tzinfo=datetime.timezone.utc).isoformat()
             started_at_str = current_state.get("started_at")
             if active_row and active_row[1]:
                 started_at_dt = active_row[1]
@@ -362,3 +377,38 @@ def ready():
 @app.get("/metrics")
 def metrics():
     return {"events_processed": 0} # Stub
+
+@app.delete("/api/v1/sessions/active/{session_id}")
+async def delete_active_session(session_id: str, current_user: dict = Depends(require_role("admin"))):
+    async with get_db_transaction() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT slot_id FROM active_session_locks WHERE session_id = %s", (session_id,))
+            row = await cur.fetchone()
+            if not row:
+                return {"status": "success", "message": "Session not active"}
+            
+            slot_id = row[0]
+            await cur.execute("DELETE FROM active_session_locks WHERE session_id = %s", (session_id,))
+            
+            # CLEAR REDIS STATE SO NEXT FRAME TRIGGERS A NEW SESSION
+            LIVE_KEY_PREFIX = os.getenv("LIVE_OCCUPANCY_KEY_PREFIX", "parking:live:slot")
+            await redis_client.hset(f"{LIVE_KEY_PREFIX}:{slot_id}", "status", "EMPTY")
+            await redis_client.hset(f"parking:slot:{slot_id}", "status", "EMPTY")
+            
+    return {"status": "success", "message": "Active session deleted successfully"}
+
+@app.delete("/api/v1/sessions/active")
+async def clear_all_active_sessions(current_user: dict = Depends(require_role("admin"))):
+    async with get_db_transaction() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT slot_id FROM active_session_locks")
+            rows = await cur.fetchall()
+            await cur.execute("DELETE FROM active_session_locks")
+            
+            LIVE_KEY_PREFIX = os.getenv("LIVE_OCCUPANCY_KEY_PREFIX", "parking:live:slot")
+            for r in rows:
+                slot_id = r[0]
+                await redis_client.hset(f"{LIVE_KEY_PREFIX}:{slot_id}", "status", "EMPTY")
+                await redis_client.hset(f"parking:slot:{slot_id}", "status", "EMPTY")
+                
+    return {"status": "success", "message": "All active sessions cleared"}

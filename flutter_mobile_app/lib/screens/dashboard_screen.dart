@@ -32,7 +32,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final slots = ref.watch(slotsProvider);
-    final sessions = ref.watch(activeSessionsProvider);
+    final sessions = ref.watch(filteredActiveSessionsProvider);
     final ws =
         ref.watch(wsConnectionProvider).value ?? WsConnectionState.disconnected;
 
@@ -107,6 +107,80 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   child: _SectionHeader(
                     title: 'Xe đang đỗ',
                     trailing: '${sessions.sessions.length} phiên',
+                    action: widget.user.isAdmin
+                        ? TextButton.icon(
+                            onPressed: () async {
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Xóa tất cả xe đang đỗ?'),
+                                  content: const Text(
+                                    'Thao tác này sẽ đóng/xóa toàn bộ phiên đang hoạt động. Lịch sử đã hoàn tất không bị ảnh hưởng.',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(ctx, false),
+                                      child: const Text('Hủy'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx, true),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: AppTheme.red,
+                                      ),
+                                      child: const Text('Xóa tất cả'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirm == true) {
+                                try {
+                                  await ref
+                                      .read(activeSessionsProvider.notifier)
+                                      .clearAllSessions();
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Xóa thành công!'),
+                                      ),
+                                    );
+                                    widget.onRefreshAll(silent: true);
+                                  }
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          e.toString().replaceAll(
+                                            'Exception: ',
+                                            '',
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                }
+                              }
+                            },
+                            icon: const Icon(
+                              Icons.delete_sweep,
+                              size: 16,
+                              color: AppTheme.red,
+                            ),
+                            label: const Text(
+                              'Xóa tất cả',
+                              style: TextStyle(
+                                color: AppTheme.red,
+                                fontSize: 12,
+                              ),
+                            ),
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(0, 0),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          )
+                        : null,
                   ),
                 ),
               ),
@@ -145,9 +219,73 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     itemCount: sessions.sessions.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      return _ActiveSessionCard(
+                      final card = _ActiveSessionCard(
                         session: sessions.sessions[index],
                       );
+                      if (widget.user.isAdmin) {
+                        return Dismissible(
+                          key: Key(sessions.sessions[index].id),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: 20),
+                            color: AppTheme.red,
+                            child: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.white,
+                            ),
+                          ),
+                          confirmDismiss: (direction) async {
+                            return await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Xóa phiên đang đỗ?'),
+                                content: const Text(
+                                  'Bạn có chắc muốn xóa phiên này? Lịch sử đã hoàn tất không bị ảnh hưởng.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('Hủy'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: AppTheme.red,
+                                    ),
+                                    child: const Text('Xóa'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          onDismissed: (direction) async {
+                            try {
+                              await ref
+                                  .read(activeSessionsProvider.notifier)
+                                  .deleteSession(sessions.sessions[index].id);
+                              if (context.mounted)
+                                widget.onRefreshAll(silent: true);
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      e.toString().replaceAll(
+                                        'Exception: ',
+                                        '',
+                                      ),
+                                    ),
+                                  ),
+                                );
+                                widget.onRefreshAll(silent: true);
+                              }
+                            }
+                          },
+                          child: card,
+                        );
+                      }
+                      return card;
                     },
                   ),
                 ),
@@ -160,7 +298,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   void _showSlotDetail(Slot slot, List<ParkingSession> sessions) {
-    final session = sessions.where((item) => item.slotId == slot.id).firstOrNull;
+    final session = sessions
+        .where((item) => item.slotId == slot.id)
+        .firstOrNull;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -416,8 +556,9 @@ class _KpiCard extends StatelessWidget {
 class _SectionHeader extends StatelessWidget {
   final String title;
   final String? trailing;
+  final Widget? action;
 
-  const _SectionHeader({required this.title, this.trailing});
+  const _SectionHeader({required this.title, this.trailing, this.action});
 
   @override
   Widget build(BuildContext context) {
@@ -459,7 +600,11 @@ class _InlineWarning extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.warning_amber_rounded, color: AppTheme.red, size: 18),
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: AppTheme.red,
+            size: 18,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -548,6 +693,7 @@ class _ActiveSessionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isPending = session.status == 'pending';
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -579,7 +725,7 @@ class _ActiveSessionCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Phiên ${session.shortId}',
+                  isPending ? 'Đang tạo phiên...' : 'Phiên ${session.shortId}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -589,7 +735,9 @@ class _ActiveSessionCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Vào lúc ${formatDateTime(session.startTime)}',
+                  isPending
+                      ? 'Đang đồng bộ'
+                      : 'Vào lúc ${formatDateTime(session.startTime)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -601,26 +749,36 @@ class _ActiveSessionCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                formatDurationFull(session.displayDuration),
-                style: const TextStyle(
-                  color: AppTheme.cyan,
-                  fontWeight: FontWeight.w800,
+          if (!isPending)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  formatDurationFull(session.displayDuration),
+                  style: const TextStyle(
+                    color: AppTheme.cyan,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                formatCurrency(session.feeVnd),
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
+                const SizedBox(height: 4),
+                Text(
+                  formatCurrency(session.displayFeeVnd),
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                  ),
                 ),
+              ],
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.only(right: 8.0),
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
-            ],
-          ),
+            ),
         ],
       ),
     );
@@ -683,7 +841,10 @@ class _SlotDetailSheet extends StatelessWidget {
             _DetailRow('Bắt đầu', formatDateTime(slot.startedAt)),
             if (session != null) ...[
               _DetailRow('Phiên', session!.shortId),
-              _DetailRow('Thời gian', formatDurationFull(session!.displayDuration)),
+              _DetailRow(
+                'Thời gian',
+                formatDurationFull(session!.displayDuration),
+              ),
               _DetailRow('Phí', formatCurrency(session!.feeVnd)),
             ],
           ],

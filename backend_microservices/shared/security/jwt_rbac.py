@@ -124,7 +124,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Security(securi
 
 def require_role(required_role: str):
     def role_checker(user: dict = Security(get_current_user)):
-        if user.get("role") != required_role and user.get("role") != "admin":
+        if str(user.get("role", "")).strip().lower() != required_role.lower() and str(user.get("role", "")).strip().lower() != "admin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not enough permissions"

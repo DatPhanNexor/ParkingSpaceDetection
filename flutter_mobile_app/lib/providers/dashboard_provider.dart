@@ -1,3 +1,4 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -220,6 +221,16 @@ class ActiveSessionsNotifier extends Notifier<SessionsState> {
         .toList();
     state = SessionsState(sessions: sessions, lastUpdated: DateTime.now());
   }
+
+  Future<void> deleteSession(String sessionId) async {
+    await ref.read(parkingRepositoryProvider).deleteActiveSession(sessionId);
+    await fetch(silent: true);
+  }
+
+  Future<void> clearAllSessions() async {
+    await ref.read(parkingRepositoryProvider).clearAllActiveSessions();
+    await fetch(silent: true);
+  }
 }
 
 final activeSessionsProvider =
@@ -241,6 +252,20 @@ class HistoryNotifier extends Notifier<SessionsState> {
     } catch (error) {
       state = state.copyWith(isLoading: false, error: error.toString());
     }
+  }
+
+  Future<void> deleteSession(String transactionId) async {
+    await ref
+        .read(parkingRepositoryProvider)
+        .deleteHistorySession(transactionId);
+    await fetch(silent: true);
+  }
+
+  Future<void> deleteBatchSessions(List<String> transactionIds) async {
+    await ref
+        .read(parkingRepositoryProvider)
+        .deleteBatchHistorySessions(transactionIds);
+    await fetch(silent: true);
   }
 }
 
@@ -302,6 +327,7 @@ class ReportState {
   final bool isLoading;
   final String? error;
   final DateTime? lastUpdated;
+  final DateTime? shiftStart;
 
   const ReportState({
     this.summary,
@@ -310,6 +336,7 @@ class ReportState {
     this.isLoading = false,
     this.error,
     this.lastUpdated,
+    this.shiftStart,
   });
 
   ReportState copyWith({
@@ -319,6 +346,7 @@ class ReportState {
     bool? isLoading,
     Object? error = _unset,
     DateTime? lastUpdated,
+    DateTime? shiftStart,
   }) {
     return ReportState(
       summary: summary ?? this.summary,
@@ -327,28 +355,61 @@ class ReportState {
       isLoading: isLoading ?? this.isLoading,
       error: identical(error, _unset) ? this.error : error as String?,
       lastUpdated: lastUpdated ?? this.lastUpdated,
+      shiftStart: shiftStart ?? this.shiftStart,
     );
   }
 }
 
 class ReportNotifier extends Notifier<ReportState> {
+  static const _shiftStartKey = 'report_shift_start';
+  final _storage = const FlutterSecureStorage();
+
   @override
-  ReportState build() => const ReportState();
+  ReportState build() {
+    _initShiftStart();
+    return const ReportState();
+  }
+
+  bool _isShiftStartInitialized = false;
+
+  Future<void> _initShiftStart() async {
+    if (_isShiftStartInitialized) return;
+    final val = await _storage.read(key: _shiftStartKey);
+    if (val != null) {
+      final dt = DateTime.tryParse(val);
+      if (dt != null) {
+        state = state.copyWith(shiftStart: dt);
+      }
+    }
+    _isShiftStartInitialized = true;
+  }
+
+  Future<void> resetShift() async {
+    final nowUtc = DateTime.now().toUtc();
+    await _storage.write(key: _shiftStartKey, value: nowUtc.toIso8601String());
+    state = state.copyWith(shiftStart: nowUtc);
+    await fetchAll();
+  }
 
   Future<void> fetchAll({bool silent = false}) async {
     if (!silent) state = state.copyWith(isLoading: true, error: null);
     try {
+      if (!_isShiftStartInitialized) {
+        await _initShiftStart();
+      }
       final repo = ref.read(reportingRepositoryProvider);
+      final since = state.shiftStart;
       final results = await Future.wait<dynamic>([
-        repo.getSummary(),
-        repo.getRevenue(),
-        repo.getFrequency(),
+        repo.getSummary(since: since),
+        repo.getRevenue(since: since),
+        repo.getFrequency(since: since),
       ]);
-      state = ReportState(
+      state = state.copyWith(
         summary: results[0] as Map<String, dynamic>,
         revenue: results[1] as List<Map<String, dynamic>>,
         frequency: results[2] as List<Map<String, dynamic>>,
         lastUpdated: DateTime.now(),
+        isLoading: false,
       );
     } catch (error) {
       state = state.copyWith(isLoading: false, error: error.toString());
@@ -363,3 +424,32 @@ final reportProvider = NotifierProvider<ReportNotifier, ReportState>(
 List<Slot> _unknownSlots() {
   return [for (final id in AppConstants.slotIds) Slot.unknown(id)];
 }
+
+final filteredActiveSessionsProvider = Provider<SessionsState>((ref) {
+  final activeSessionsState = ref.watch(activeSessionsProvider);
+  final slotsState = ref.watch(slotsProvider);
+
+  final sessionsMap = {
+    for (final s in activeSessionsState.sessions) s.slotId: s,
+  };
+
+  final List<ParkingSession> combined = [];
+  for (final slot in slotsState.slots) {
+    if (slot.isOccupied) {
+      if (sessionsMap.containsKey(slot.id)) {
+        combined.add(sessionsMap[slot.id]!);
+      } else {
+        combined.add(
+          ParkingSession(
+            id: 'pending_${slot.id}',
+            slotId: slot.id,
+            status: 'pending',
+            startTime: DateTime.now(),
+          ),
+        );
+      }
+    }
+  }
+
+  return activeSessionsState.copyWith(sessions: combined);
+});
