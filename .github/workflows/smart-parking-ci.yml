@@ -104,19 +104,20 @@ jobs:
 
           python -m pip install --upgrade pip wheel
 
+          python -m pip install -r backend_microservices/requirements-core.txt
+
           python -m pip install \
-            "fastapi>=0.109,<1" \
-            "pydantic>=2.6,<3" \
-            "passlib>=1.7.4,<2" \
-            "PyJWT>=2.8,<3" \
-            "aio-pika>=9.4,<10" \
             "pytest>=8,<9" \
             "pytest-asyncio>=0.23,<2" \
             "httpx2"
 
           python -m pip check
 
-          python -c "from fastapi.testclient import TestClient; print('FastAPI TestClient import OK')"
+          python - <<'PY'
+from pydantic_settings import BaseSettings
+from fastapi.testclient import TestClient
+print("Backend CI dependency imports: OK")
+PY
 
 
       - name: Compile backend Python sources
