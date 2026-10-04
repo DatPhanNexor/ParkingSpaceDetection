@@ -111,9 +111,12 @@ jobs:
             "PyJWT>=2.8,<3" \
             "aio-pika>=9.4,<10" \
             "pytest>=8,<9" \
-            "pytest-asyncio>=0.23,<2"
+            "pytest-asyncio>=0.23,<2" \
+            "httpx2"
 
           python -m pip check
+
+          python -c "from fastapi.testclient import TestClient; print('FastAPI TestClient import OK')"
 
 
       - name: Compile backend Python sources
