@@ -113,11 +113,7 @@ jobs:
 
           python -m pip check
 
-          python - <<'PY'
-from pydantic_settings import BaseSettings
-from fastapi.testclient import TestClient
-print("Backend CI dependency imports: OK")
-PY
+          python -c "from pydantic_settings import BaseSettings; from fastapi.testclient import TestClient; print('Backend CI dependency imports: OK')"
 
 
       - name: Compile backend Python sources
