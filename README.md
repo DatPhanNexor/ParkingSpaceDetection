@@ -2,7 +2,7 @@
   <img
     src=".github/assets/parking-space-detection-logo.png"
     alt="ParkingSpaceDetection Logo"
-    width="200"
+    width="260"
   />
 </p>
 
