@@ -1,6 +1,31 @@
+import asyncio
+import csv
 import datetime
+import inspect
+import io
+import json
+import logging
+import os
+from typing import List, Dict, Any
 
-def get_since_datetime(since: str = None) -> datetime.datetime | None:
+from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from shared.database import get_db_connection, redis_client
+from shared.security import get_current_user, require_role, decode_access_token
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("reporting_service")
+
+app = FastAPI(title="Dashboard and Reporting Service")
+
+LIVE_SLOT_KEY_PREFIX = os.getenv("LIVE_OCCUPANCY_KEY_PREFIX", "parking:live:slot")
+SLOT_IDS = tuple(f"S0{i}" for i in range(1, 10))
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def get_since_datetime(since: str | None = None) -> datetime.datetime | None:
     if not since:
         return None
     try:
@@ -8,27 +33,15 @@ def get_since_datetime(since: str = None) -> datetime.datetime | None:
         if dt.tzinfo is not None:
             dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
         return dt
-    except:
+    except (ValueError, TypeError):
         return None
-import json
-import asyncio
-from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import StreamingResponse
-from typing import List, Dict, Any
-import csv
-import io
-import logging
-import os
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("reporting_service")
 
-from shared.database import get_db_connection, redis_client
-from shared.security import get_current_user, require_role, decode_access_token
+def _escape_csv_cell(value: Any) -> Any:
+    if isinstance(value, str) and value.startswith(CSV_FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
 
-app = FastAPI(title="Dashboard and Reporting Service")
-
-LIVE_SLOT_KEY_PREFIX = os.getenv("LIVE_OCCUPANCY_KEY_PREFIX", "parking:live:slot")
 
 class ConnectionManager:
     def __init__(self):
@@ -55,13 +68,33 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+async def _hgetall_slot(key: str) -> Dict[str, Any]:
+    res = redis_client.hgetall(key)
+    state = await res if inspect.isawaitable(res) else res
+    return state if isinstance(state, dict) else {}
+
+
 async def _build_slots_snapshot() -> List[Dict[str, Any]]:
+    raw_states: list[Any] | None = None
+    if hasattr(redis_client, "pipeline"):
+        pipe = redis_client.pipeline(transaction=False)
+        if hasattr(pipe, "hgetall"):
+            for slot_id in SLOT_IDS:
+                pipe.hgetall(f"{LIVE_SLOT_KEY_PREFIX}:{slot_id}")
+            exec_res = pipe.execute()
+            executed = await exec_res if inspect.isawaitable(exec_res) else exec_res
+            if isinstance(executed, list) and len(executed) == len(SLOT_IDS):
+                raw_states = executed
+
+    if raw_states is None:
+        raw_states = [
+            await _hgetall_slot(f"{LIVE_SLOT_KEY_PREFIX}:{slot_id}")
+            for slot_id in SLOT_IDS
+        ]
+
     slots = []
-    for i in range(1, 10):
-        slot_id = f"S0{i}"
-        # Live occupancy is maintained by desktop-sync-service. Do not fall
-        # back to session/billing Redis keys: those can be stale history.
-        state = await redis_client.hgetall(f"{LIVE_SLOT_KEY_PREFIX}:{slot_id}")
+    for slot_id, state in zip(SLOT_IDS, raw_states):
+        state = state if isinstance(state, dict) else {}
         slots.append({
             "slot_id": slot_id,
             "status": state.get("status", "EMPTY") if state else "EMPTY",
@@ -146,9 +179,9 @@ async def get_slots(current_user: dict = Depends(get_current_user)):
 
 @app.get("/api/v1/slots/{slot_id}")
 async def get_slot(slot_id: str, current_user: dict = Depends(get_current_user)):
-    if slot_id not in {f"S0{i}" for i in range(1, 10)}:
+    if slot_id not in SLOT_IDS:
         raise HTTPException(status_code=404, detail="Slot not found")
-    state = await redis_client.hgetall(f"{LIVE_SLOT_KEY_PREFIX}:{slot_id}")
+    state = await _hgetall_slot(f"{LIVE_SLOT_KEY_PREFIX}:{slot_id}")
     return {
         "slot_id": slot_id,
         "status": state.get("status", "EMPTY") if state else "EMPTY",
@@ -174,7 +207,7 @@ async def get_history(current_user: dict = Depends(get_current_user)):
             return [{"transaction_id": r[0], "slot_id": r[1], "gio_vao": _format_datetime(r[2]), "gio_ra": _format_datetime(r[3]), "thanh_tien": r[4]} for r in rows]
 
 @app.get("/api/v1/reports/summary")
-async def get_summary(since: str = None, current_user: dict = Depends(require_role("admin"))):
+async def get_summary(since: str | None = None, current_user: dict = Depends(require_role("admin"))):
     since_dt = get_since_datetime(since)
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
@@ -202,7 +235,7 @@ async def get_summary(since: str = None, current_user: dict = Depends(require_ro
             return {"total_sessions": 0, "active_sessions": 0, "total_revenue": 0}
 
 @app.get("/api/v1/reports/revenue")
-async def get_revenue(since: str = None, current_user: dict = Depends(require_role("admin"))):
+async def get_revenue(since: str | None = None, current_user: dict = Depends(require_role("admin"))):
     since_dt = get_since_datetime(since)
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
@@ -219,7 +252,7 @@ async def get_revenue(since: str = None, current_user: dict = Depends(require_ro
             return [{"slot_id": r[0], "sessions": r[1], "revenue": r[2] or 0} for r in rows]
 
 @app.get("/api/v1/reports/frequency")
-async def get_frequency(since: str = None, current_user: dict = Depends(require_role("admin"))):
+async def get_frequency(since: str | None = None, current_user: dict = Depends(require_role("admin"))):
     since_dt = get_since_datetime(since)
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
@@ -246,7 +279,7 @@ async def export_csv(current_user: dict = Depends(require_role("admin"))):
     writer = csv.writer(output)
     writer.writerow(["transaction_id", "slot_id", "gio_vao", "gio_ra", "thanh_tien"])
     for row in rows:
-        writer.writerow(row)
+        writer.writerow([_escape_csv_cell(col) for col in row])
         
     output.seek(0)
     return StreamingResponse(output, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=export.csv"})
@@ -262,7 +295,7 @@ async def get_alerts(current_user: dict = Depends(get_current_user)):
 @app.websocket("/ws/parking")
 async def websocket_endpoint(websocket: WebSocket, token: str):
     try:
-        user = decode_access_token(token)
+        decode_access_token(token)
     except Exception:
         await websocket.close(code=1008)
         return
@@ -299,7 +332,7 @@ async def delete_history_session(transaction_id: str, current_user: dict = Depen
             await conn.commit()
     return {"status": "success", "message": "History record deleted successfully"}
 
-from pydantic import BaseModel
+
 class BatchDeleteRequest(BaseModel):
     transaction_ids: list[str]
 

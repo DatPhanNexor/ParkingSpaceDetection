@@ -339,8 +339,7 @@ def test_bridge_conversion_no_tuple_error(monkeypatch) -> None:
     ))
     import sys
     ultralytics_mock = SimpleNamespace(YOLO=lambda path: SimpleNamespace())
-    # pyrefly: ignore [unsupported-operation]
-    sys.modules["ultralytics"] = ultralytics_mock
+    monkeypatch.setitem(sys.modules, "ultralytics", ultralytics_mock)
 
     # Create bridge instance
     import os

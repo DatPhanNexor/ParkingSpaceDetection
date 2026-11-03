@@ -1,4 +1,14 @@
-# AI-Powered Smart Parking Monitoring and Management System
+<p align="center">
+  <img
+    src=".github/assets/parking-space-detection-logo.png"
+    alt="ParkingSpaceDetection Logo"
+    width="200"
+  />
+</p>
+
+<h1 align="center">
+  AI-Powered Smart Parking Monitoring and Management System
+</h1>
 
 > **Xây dựng hệ thống giám sát và quản lý bãi đỗ xe thông minh ứng dụng trí tuệ nhân tạo**
 
@@ -10,43 +20,43 @@ Hệ thống sử dụng các mô hình **YOLO kết hợp OpenCV** để xử l
 
 ## 1. Mục lục
 
-- [1. Tổng quan](#2-tổng-quan)
-- [2. Mục tiêu dự án](#3-mục-tiêu-dự-án)
-- [3. Phạm vi hệ thống](#4-phạm-vi-hệ-thống)
-- [4. Kiến trúc tổng thể](#5-kiến-trúc-tổng-thể)
-- [5. Công nghệ sử dụng](#6-công-nghệ-sử-dụng)
-- [6. Luồng nghiệp vụ chính](#7-luồng-nghiệp-vụ-chính)
-- [7. AI và Computer Vision](#8-ai-và-computer-vision)
-- [8. Parking Session và Billing](#9-parking-session-và-billing)
-- [9. Backend và Microservices](#10-backend-và-microservices)
-- [10. MySQL](#11-mysql)
-- [11. Redis](#12-redis)
-- [12. RabbitMQ](#13-rabbitmq)
-- [13. Authentication và RBAC](#14-authentication-và-rbac)
-- [14. Streamlit Dashboard](#15-streamlit-dashboard)
-- [15. Flutter Mobile App](#16-flutter-mobile-app)
-- [16. Cấu trúc thư mục](#17-cấu-trúc-thư-mục)
-- [17. Model và Dataset](#18-model-và-dataset)
-- [18. Tài nguyên dung lượng lớn](#19-tài-nguyên-dung-lượng-lớn)
-- [19. Yêu cầu hệ thống](#20-yêu-cầu-hệ-thống)
-- [20. Cài đặt Python](#21-cài-đặt-python)
-- [21. Cấu hình MySQL](#22-cấu-hình-mysql)
-- [22. Chạy Desktop App](#23-chạy-desktop-app)
-- [23. Image Mode](#24-image-mode)
-- [24. Video Mode](#25-video-mode)
-- [25. Webcam / DroidCam](#26-webcam--droidcam)
-- [26. Chạy Dashboard](#27-chạy-dashboard)
-- [27. Chạy Flutter Android](#28-chạy-flutter-android)
-- [28. Android Emulator](#29-android-emulator)
-- [29. Backend từ Android Emulator](#30-backend-từ-android-emulator)
-- [30. Testing](#31-testing)
-- [31. Docker và CI/CD](#32-docker-và-cicd)
-- [32. Logging và Security](#33-logging-và-security)
-- [33. Troubleshooting](#34-troubleshooting)
-- [34. Quy trình Demo](#35-quy-trình-demo)
-- [35. Phạm vi mở rộng](#36-phạm-vi-mở-rộng)
-- [36. Quick Start](#37-quick-start)
-- [37. License](#38-license)
+- [2. Tổng quan](#2-tổng-quan)
+- [3. Mục tiêu dự án](#3-mục-tiêu-dự-án)
+- [4. Phạm vi hệ thống](#4-phạm-vi-hệ-thống)
+- [5. Kiến trúc tổng thể](#5-kiến-trúc-tổng-thể)
+- [6. Công nghệ sử dụng](#6-công-nghệ-sử-dụng)
+- [7. Luồng nghiệp vụ chính](#7-luồng-nghiệp-vụ-chính)
+- [8. AI và Computer Vision](#8-ai-và-computer-vision)
+- [9. Parking Session và Billing](#9-parking-session-và-billing)
+- [10. Backend và Microservices](#10-backend-và-microservices)
+- [11. MySQL](#11-mysql)
+- [12. Redis](#12-redis)
+- [13. RabbitMQ](#13-rabbitmq)
+- [14. Authentication và RBAC](#14-authentication-và-rbac)
+- [15. Streamlit Dashboard](#15-streamlit-dashboard)
+- [16. Flutter Mobile App](#16-flutter-mobile-app)
+- [17. Cấu trúc thư mục](#17-cấu-trúc-thư-mục)
+- [18. Model và Dataset](#18-model-và-dataset)
+- [19. Tài nguyên dung lượng lớn](#19-tài-nguyên-dung-lượng-lớn)
+- [20. Yêu cầu hệ thống](#20-yêu-cầu-hệ-thống)
+- [21. Cài đặt Python](#21-cài-đặt-python)
+- [22. Cấu hình MySQL](#22-cấu-hình-mysql)
+- [23. Chạy Desktop App](#23-chạy-desktop-app)
+- [24. Image Mode](#24-image-mode)
+- [25. Video Mode](#25-video-mode)
+- [26. Webcam / DroidCam](#26-webcam--droidcam)
+- [27. Chạy Dashboard](#27-chạy-dashboard)
+- [28. Chạy Flutter Android](#28-chạy-flutter-android)
+- [29. Android Emulator](#29-android-emulator)
+- [30. Backend từ Android Emulator](#30-backend-từ-android-emulator)
+- [31. Testing](#31-testing)
+- [32. Docker và CI/CD](#32-docker-và-cicd)
+- [33. Logging và Security](#33-logging-và-security)
+- [34. Troubleshooting](#34-troubleshooting)
+- [35. Quy trình Demo](#35-quy-trình-demo)
+- [36. Phạm vi mở rộng](#36-phạm-vi-mở-rộng)
+- [37. Quick Start](#37-quick-start)
+- [38. License](#38-license)
 
 ---
 
@@ -457,57 +467,59 @@ hệ thống:
 9. cập nhật Redis;
 10. phát event cần thiết.
 
+Cấu hình biểu phí mặc định trong `cau_hinh` / `BillingConfig`:
+
+- `gia_moi_gio`: `20.000 VNĐ/giờ`;
+- `buoc_lam_tron`: làm tròn lên theo bậc `5.000 VNĐ`;
+- `phi_toi_thieu`: `5.000 VNĐ` (áp dụng ngay khi phiên đỗ xe bắt đầu hoặc kết thúc với thời lượng > 0 giây).
+
 ---
 
 # 10. Backend và Microservices
 
-Kiến trúc logic gồm các service chính.
+Kiến trúc thực tế trong `backend_microservices/services/` gồm 5 microservice FastAPI chính:
 
-## Authentication Service
-
-Chịu trách nhiệm:
-
-- login;
-- password verification;
-- Access Token;
-- Refresh Token;
-- JWT;
-- user role;
-- authorization.
-
-## AI Detection Service
+## Authentication Service (`auth_service` — Port `8001`)
 
 Chịu trách nhiệm:
 
-- xử lý/tiếp nhận detection;
-- chuẩn hóa kết quả AI;
-- phát event;
-- truyền trạng thái mới đến hệ thống nghiệp vụ.
+- login (`POST /api/v1/auth/login`), refresh (`POST /api/v1/auth/refresh`), logout (`POST /api/v1/auth/logout`), lấy thông tin user (`GET /api/v1/auth/me`);
+- password verification (bcrypt, hỗ trợ tự động nâng cấp từ SHA-256 legacy);
+- Access Token & Refresh Token (JWT);
+- user role (`admin` / `staff`) và authorization;
+- kết nối trực tiếp tới **MySQL** (`tai_khoan`, `refresh_tokens`).
 
-## Parking and Billing Service
-
-Chịu trách nhiệm:
-
-- parking slot;
-- Parking Session;
-- state transition;
-- duration;
-- fee;
-- duplicate prevention;
-- MySQL;
-- Redis;
-- RabbitMQ events.
-
-## Dashboard and Reporting Service
+## AI Detection Service (`ai_detection_service` — Port `8002`)
 
 Chịu trách nhiệm:
 
-- dashboard data;
-- history;
-- revenue;
-- slot statistics;
-- utilization;
-- reports.
+- xử lý/tiếp nhận detection (`POST /api/v1/detect/frame`, `POST /api/v1/detect/mock-transition`);
+- chuẩn hóa kết quả AI thông qua `LegacyAIAdapter` và `SlotIDMapper` (`S01`–`S09`);
+- phát event `detection.completed` lên **RabbitMQ** exchange `parking.events`.
+
+## Parking and Billing Service (`parking_billing_service` — Port `8003`)
+
+Chịu trách nhiệm:
+
+- quản lý trạng thái parking slot (`S01`–`S09`) và Parking Session (`GET /api/v1/slots`, `POST /api/v1/slots/{slot_id}/override`, `DELETE /api/v1/sessions/active`, `DELETE /api/v1/sessions/active/{session_id}`);
+- state transition (`EMPTY ↔ OCCUPIED`), tính duration và fee theo `BillingConfig`;
+- duplicate prevention / idempotency qua bảng `processed_events` và khóa phân tán Redis (`parking:lock:{slot_id}`);
+- lưu trữ bền vững vào **MySQL** (`parking_slots`, `lich_su_xe`, `active_session_locks`, `outbox_events`), cập nhật **Redis** và phát sự kiện qua **RabbitMQ** (Transactional Outbox).
+
+## Dashboard and Reporting Service (`reporting_service` — Port `8004`)
+
+Chịu trách nhiệm:
+
+- cung cấp dashboard data (`GET /api/v1/reports/summary`), lịch sử phiên đỗ (`GET /api/v1/reports/sessions`), xóa lịch sử/phiên và quản lý mốc ca báo cáo (`POST /api/v1/reports/reset-watermark`, `GET /api/v1/reports/reset-state`);
+- đẩy cập nhật thời gian thực qua WebSocket (`WS /ws/parking`);
+- tổng hợp dữ liệu trực tiếp từ **MySQL** kết hợp trạng thái live trên **Redis** (`parking:live:slot:*`).
+
+## Desktop Live Occupancy Sync Service (`desktop_sync_service` — Port `8005`)
+
+Chịu trách nhiệm:
+
+- tiếp nhận đồng bộ trạng thái 9 ô đỗ (`S01`–`S09`) theo thời gian thực từ Desktop App / Webcam Board Lock qua `POST /api/v1/sync`;
+- cập nhật nhanh trạng thái live trên **Redis** (`parking:live:slot:S01..S09` với TTL `15s`, `parking:live:meta`) và đồng bộ phiên đỗ (`lich_su_xe`, `parking_slots`, `active_session_locks`) trong **MySQL** để Mobile App và Dashboard hiển thị tức thì.
 
 ---
 
@@ -521,33 +533,30 @@ Database:
 ai_parking_system
 ```
 
-Script khởi tạo:
+Các script khởi tạo schema:
 
 ```text
 database/ai_parking_system.sql
+backend_microservices/migrations/001_initial_schema.sql
 ```
+
+- `database/ai_parking_system.sql`: khởi tạo các bảng cốt lõi dùng chung cho cả Desktop App và Backend (`tai_khoan`, `lich_su_xe`, `cau_hinh`) cùng 3 SQL Views (`vw_dashboard_summary`, `vw_doanh_thu_theo_slot`, `vw_tan_suat_theo_slot`).
+- `backend_microservices/migrations/001_initial_schema.sql`: bổ sung các bảng vận hành cho kiến trúc Microservices (`parking_slots`, `active_session_locks`, `refresh_tokens`, `processed_events`, `outbox_events`, `system_alerts`, `service_heartbeats`, `schema_migrations`).
 
 Dữ liệu gồm:
 
-- users;
-- roles;
-- parking slots;
-- slot states;
-- active sessions;
-- completed sessions;
-- check-in/check-out;
-- parking duration;
-- fee;
-- revenue;
-- billing configuration;
-- activity history;
-- system/error logs cần thiết.
+- users & roles (`tai_khoan`, `refresh_tokens`);
+- parking slots & slot states (`parking_slots`, `active_session_locks`);
+- active sessions, completed sessions, check-in/check-out, duration, fee (`lich_su_xe`);
+- billing configuration & mốc ca báo cáo (`cau_hinh`);
+- idempotency & transactional outbox (`processed_events`, `outbox_events`);
+- system alerts & heartbeats (`system_alerts`, `service_heartbeats`).
 
-Thông số development mặc định:
+Thông số development mặc định (Local MySQL / Laragon / XAMPP):
 
 ```text
 Host     : 127.0.0.1
-Port     : 3306
+Port     : 3306 (Docker standalone map cổng host 3307 -> 3306)
 User     : root
 Password :
 Database : ai_parking_system
@@ -555,7 +564,7 @@ Database : ai_parking_system
 
 Nên sử dụng environment variables thay cho hard-code.
 
-Ví dụ:
+Ví dụ (Desktop App & Docker Compose sử dụng `AI_PARKING_DB_*`, các FastAPI microservices đọc `DB_*`):
 
 ```env
 AI_PARKING_DB_HOST=127.0.0.1
@@ -563,23 +572,26 @@ AI_PARKING_DB_PORT=3306
 AI_PARKING_DB_USER=root
 AI_PARKING_DB_PASSWORD=
 AI_PARKING_DB_NAME=ai_parking_system
+
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=
+DB_NAME=ai_parking_system
 ```
 
 ---
 
 # 12. Redis
 
-Redis được dùng cho dữ liệu truy cập nhanh:
+Redis được dùng cho dữ liệu truy cập nhanh và đồng bộ thời gian thực:
 
-- trạng thái S01–S09;
-- tổng EMPTY/OCCUPIED;
-- active sessions;
-- elapsed time;
-- estimated fee;
-- last update;
-- processed event IDs;
-- temporary locks;
-- session/refresh state khi cần.
+- trạng thái live từ Desktop/Camera (`parking:live:slot:S01` .. `parking:live:slot:S09`, TTL `15s`, kèm `parking:live:meta`);
+- cache trạng thái slot của Billing Service (`parking:slot:S01` .. `parking:slot:S09`, TTL `3600s`);
+- tổng `EMPTY` / `OCCUPIED`, active sessions, elapsed time, estimated fee, last update;
+- khóa phân tán ngắn hạn chống race condition theo từng ô (`parking:lock:S01` .. `parking:lock:S09`).
+
+*(Lưu ý: Danh sách `processed_events` phục vụ idempotency và `refresh_tokens` được lưu bền vững trong **MySQL** để đảm bảo tính toàn vẹn giao dịch ACID cùng với `lich_su_xe`).*
 
 Redis không thay thế MySQL.
 
@@ -588,26 +600,34 @@ MySQL = Source of Truth
 Redis = Cache / Realtime State
 ```
 
-Khi Redis restart, hệ thống phải có khả năng khôi phục trạng thái cần thiết từ MySQL.
+Khi Redis restart, hệ thống tự động fallback và khôi phục trạng thái cần thiết từ MySQL.
 
 ---
 
 # 13. RabbitMQ
 
-RabbitMQ dùng để truyền sự kiện giữa các service.
+RabbitMQ dùng để truyền sự kiện bất đồng bộ giữa các service thông qua Topic Exchange `parking.events`.
 
-Các event chính:
+Các event và thành phần hàng đợi thực tế trong mã nguồn (`backend_microservices/shared/events/`):
+
+```text
+Exchange chính       : parking.events (Topic)
+Worker Queue         : billing.worker.queue (routing key: detection.*)
+Dead Letter Exchange : parking.dlx (Direct)
+Dead Letter Queue    : parking.dlq (routing key: parking.dlq.routing.key)
+```
+
+Các event chính được định nghĩa và phát qua hệ thống / Transactional Outbox (`outbox_events`):
 
 ```text
 detection.completed
-detection.failed
 parking.slot.updated
 parking.session.started
 parking.session.completed
 billing.completed
 ```
 
-Mỗi event cần có ID duy nhất để hỗ trợ idempotency.
+Mỗi event đều có `event_id` duy nhất để hỗ trợ kiểm tra idempotency tại bảng `processed_events`.
 
 Luồng:
 
@@ -615,38 +635,35 @@ Luồng:
 AI Detection
      │
      ▼
- RabbitMQ
+ RabbitMQ (parking.events)
      │
      ▼
-Parking/Billing
+Parking/Billing (billing.worker.queue)
      │
      ├──► Redis
-     └──► MySQL
+     └──► MySQL (lich_su_xe + processed_events + outbox_events)
              │
              ▼
       Dashboard / Mobile
 ```
 
-Cơ chế lỗi:
+Cơ chế xử lý lỗi & Dead Letter Queue:
 
 ```text
 Message
    │
    ▼
-Processing
+Processing (kiểm tra idempotency + khóa Redis)
    │
    ├── Success ──► ACK
    │
-   └── Failure
+   └── Unhandled Exception / Invalid Payload
           │
           ▼
-        Retry
+   Reject (requeue=False)
           │
           ▼
-   Retry exhausted
-          │
-          ▼
- Dead Letter Queue
+ Dead Letter Exchange (parking.dlx) ──► Dead Letter Queue (parking.dlq)
 ```
 
 ---
@@ -800,6 +817,7 @@ YOLO không chạy trực tiếp trên Mobile.
 ParkingSpaceDetection/
 │
 ├── .github/
+│   ├── assets/                    # Project logo / GitHub assets
 │   └── workflows/                 # GitHub Actions / CI
 │
 ├── Assets/                        # Image, video, UI resources
@@ -1053,7 +1071,7 @@ pip --version
 
 # 22. Cấu hình MySQL
 
-Khởi động MySQL bằng Laragon/XAMPP.
+Khởi động MySQL bằng Laragon/XAMPP (hoặc Docker Compose).
 
 Tạo database:
 
@@ -1061,16 +1079,25 @@ Tạo database:
 CREATE DATABASE ai_parking_system;
 ```
 
-Import:
+Import schema cơ sở và schema microservices:
 
 ```text
 database/ai_parking_system.sql
+backend_microservices/migrations/001_initial_schema.sql
 ```
 
-Ví dụ MySQL CLI:
+Ví dụ MySQL CLI trên Windows PowerShell (do PowerShell không hỗ trợ toán tử `<` trực tiếp):
 
 ```powershell
+Get-Content database\ai_parking_system.sql | mysql -u root -p ai_parking_system
+Get-Content backend_microservices\migrations\001_initial_schema.sql | mysql -u root -p ai_parking_system
+```
+
+Hoặc chạy qua Command Prompt (`cmd`):
+
+```cmd
 mysql -u root -p ai_parking_system < database\ai_parking_system.sql
+mysql -u root -p ai_parking_system < backend_microservices\migrations\001_initial_schema.sql
 ```
 
 Có thể sử dụng phpMyAdmin để import thủ công.
@@ -1289,31 +1316,24 @@ localhost
 
 trỏ về emulator, không phải Windows host.
 
-Nếu FastAPI chạy ở Windows:
+Nếu các FastAPI microservices chạy ở Windows host (`127.0.0.1`), Android Emulator truy cập qua địa chỉ `10.0.2.2`. Cấu hình mặc định trong `flutter_mobile_app/lib/core/constants.dart`:
 
 ```text
-http://127.0.0.1:8000
+Auth Service (HTTP)      : http://10.0.2.2:8001/api/v1
+Billing Service (HTTP)   : http://10.0.2.2:8003/api/v1
+Reporting Service (HTTP) : http://10.0.2.2:8004/api/v1
+Reporting WebSocket (WS) : ws://10.0.2.2:8004/ws/parking
 ```
 
-Android Emulator thường truy cập bằng:
-
-```text
-http://10.0.2.2:8000
-```
-
-Tương tự với WebSocket:
-
-```text
-ws://10.0.2.2:<PORT>
-```
-
-Port phải khớp cấu hình backend thực tế.
+Có thể ghi đè host khi build/chạy bằng `--dart-define=BACKEND_HOST=<IP_LAN>` khi test trên thiết bị thật.
 
 ---
 
 # 31. Testing
 
 ## Python tests
+
+Chạy bộ test chính tại project root (`tests/`):
 
 ```powershell
 pytest
@@ -1323,6 +1343,12 @@ Verbose:
 
 ```powershell
 pytest -v
+```
+
+Chạy bộ unit & contract tests của hệ thống Microservices (`backend_microservices/tests/unit/`):
+
+```powershell
+pytest backend_microservices/tests/unit -v
 ```
 
 Các lớp kiểm thử cần bao gồm:
@@ -1384,18 +1410,30 @@ docker --version
 docker compose version
 ```
 
-Kiến trúc yêu cầu mỗi microservice có Dockerfile tương ứng.
+Kiến trúc đóng gói gồm `backend_microservices/Dockerfile.core` (cho các core services) và `backend_microservices/Dockerfile.ai` (cho `ai_detection_service`).
+
+Thư mục `infrastructure/` cung cấp 2 cấu hình Docker Compose (kèm file mẫu `infrastructure/.env.example`):
+
+- `infrastructure/compose.yaml`: chạy các microservices kết nối với MySQL có sẵn trên máy host (`host.docker.internal:3306`) cùng Redis và RabbitMQ container.
+- `infrastructure/compose.standalone.yaml`: chạy toàn bộ stack độc lập gồm MySQL 8.0 (`3307:3306`), Redis (`6379:6379`), RabbitMQ (`5672:5672`, UI `15672:15672`) và 5 microservices (`8001`–`8005`).
+
+Ví dụ khởi chạy stack bằng Docker Compose:
+
+```powershell
+Copy-Item infrastructure\.env.example infrastructure\.env
+docker compose -f infrastructure/compose.standalone.yaml --env-file infrastructure/.env up -d --build
+```
 
 Docker Compose chịu trách nhiệm điều phối các service cần thiết như:
 
 ```text
-Backend Services
+Backend Services (8001–8005)
 MySQL
 Redis
 RabbitMQ
 ```
 
-GitHub Actions được sử dụng để tự động hóa:
+GitHub Actions (`.github/workflows/smart-parking-ci.yml`) gồm 3 job tự động hóa (`backend-test`, `flutter-test`, `docker-validate`):
 
 ```text
 Checkout

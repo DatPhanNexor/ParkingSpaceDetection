@@ -1,7 +1,7 @@
-﻿import pytest
+import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock, MagicMock
-from services.reporting_service.main import app
+from services.reporting_service.main import app, _escape_csv_cell, get_since_datetime
 from shared.security import get_current_user
 
 client = TestClient(app)
@@ -59,3 +59,13 @@ def test_delete_history_unauthenticated():
 
     response2 = client.request("DELETE", "/api/v1/sessions/history", json={"transaction_ids": ["tx1"]})
     assert response2.status_code == 401
+
+def test_csv_formula_escape_and_since_datetime():
+    assert _escape_csv_cell("=CMD|' /C calc'!A0") == "'=CMD|' /C calc'!A0"
+    assert _escape_csv_cell("+SUM(A1:A2)") == "'+SUM(A1:A2)"
+    assert _escape_csv_cell("-100") == "'-100"
+    assert _escape_csv_cell("@evil") == "'@evil"
+    assert _escape_csv_cell("S01") == "S01"
+    assert _escape_csv_cell(25000) == 25000
+    assert get_since_datetime("invalid-date") is None
+    assert get_since_datetime("2026-10-04T07:00:00Z") is not None

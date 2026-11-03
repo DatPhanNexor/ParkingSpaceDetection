@@ -8,8 +8,22 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("auth_service")
 
-# Simple in-memory rate limiting for login
+# Simple in-memory rate limiting for login with bounded key eviction
 LOGIN_ATTEMPTS = {}
+MAX_TRACKED_LOGIN_USERS = 1000
+LOGIN_WINDOW = datetime.timedelta(minutes=15)
+
+
+def _prune_expired_login_attempts(now: datetime.datetime) -> None:
+    if len(LOGIN_ATTEMPTS) <= MAX_TRACKED_LOGIN_USERS:
+        return
+    expired_users = [
+        user
+        for user, timestamps in LOGIN_ATTEMPTS.items()
+        if not timestamps or all(now - ts >= LOGIN_WINDOW for ts in timestamps)
+    ]
+    for user in expired_users:
+        LOGIN_ATTEMPTS.pop(user, None)
 
 from shared.database import get_db_connection, get_db_transaction
 from shared.security import (
@@ -68,8 +82,9 @@ class UserUpdateRequest(BaseModel):
 async def login(req: LoginRequest):
     # Rate limiting check
     now = datetime.datetime.utcnow()
+    _prune_expired_login_attempts(now)
     attempts = LOGIN_ATTEMPTS.get(req.username, [])
-    attempts = [t for t in attempts if now - t < datetime.timedelta(minutes=15)]
+    attempts = [t for t in attempts if now - t < LOGIN_WINDOW]
     if len(attempts) >= 5:
         logger.warning(f"Rate limit exceeded for user: {req.username}")
         raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")

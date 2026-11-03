@@ -10,15 +10,14 @@ from typing import Optional
 from shared.security import require_role
 from fastapi import Depends
 from fastapi import FastAPI
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 import aio_pika
 
 class Settings(BaseSettings):
     rabbitmq_url: str = "amqp://guest:guest@127.0.0.1:5673/"
     redis_url: str = "redis://127.0.0.1:6380/0"
-    
-    class Config:
-        env_file = ".env"
+
+    model_config = SettingsConfigDict(env_file=".env")
 
 settings = Settings()
 

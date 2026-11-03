@@ -9,7 +9,7 @@ import time
 import cv2
 import torch
 import numpy as np
-from typing import Tuple, List, Optional
+from typing import Tuple, Optional
 from dataclasses import dataclass
 from ultralytics import YOLO
 
@@ -52,10 +52,13 @@ class ModelService:
         load_start = time.time()
         
         try:
-            self.logger.info(f"📥 Loading optimized YOLO model: {self.config.model_path}")
+            model_path = self.config.model_path
+            if not model_path:
+                raise ModelLoadError("Model path is not configured")
+            self.logger.info(f"📥 Loading optimized YOLO model: {model_path}")
             
             # Load model
-            self.model = YOLO(self.config.model_path)
+            self.model = YOLO(model_path)
             self.model.to(self.config.device)
             
             # Apply optimizations
@@ -101,6 +104,9 @@ class ModelService:
     
     def _apply_model_optimizations(self):
         """Apply various optimizations to the model"""
+        if self.model is None:
+            return
+        inner_model = getattr(self.model, "model", None)
         if self.config.device == 'cuda':
             # Enable CUDA optimizations
             if self.config.performance.enable_cuda_benchmark:
@@ -109,19 +115,21 @@ class ModelService:
             
             # Try to use half precision if supported
             try:
-                if hasattr(self.model.model, 'half'):
-                    self.model.model.half()
+                half_fn = getattr(inner_model, 'half', None)
+                if callable(half_fn):
+                    half_fn()
                     self.logger.info("🔄 Half precision (FP16) enabled")
             except Exception as e:
                 self.logger.warning(f"⚠️  Half precision failed: {e}")
         
         # Set model to evaluation mode for inference
-        if hasattr(self.model.model, 'eval'):
-            self.model.model.eval()
+        eval_fn = getattr(inner_model, 'eval', None)
+        if callable(eval_fn):
+            eval_fn()
     
     def _warmup_model(self):
         """Warm up the model with a dummy inference for better performance"""
-        if self._warmup_done:
+        if self._warmup_done or self.model is None:
             return
             
         try:
@@ -152,7 +160,7 @@ class ModelService:
     
     def _synthetic_prewarm(self):
         """Synthetic pre-warming eliminates first detection bottleneck"""
-        if self._warmup_done:
+        if self._warmup_done or self.model is None:
             return
             
         try:
@@ -205,7 +213,9 @@ class ModelService:
         detection_time = time.time() - detection_start
         
         # Process results efficiently
-        r = result[0]
+        r = result[0] if isinstance(result, (list, tuple)) else next(iter(result))
+        if isinstance(r, torch.Tensor):
+            raise ProcessingError("Unexpected tensor output from YOLO model")
         masks = r.masks
         class_ids = r.boxes.cls if r.boxes is not None else []
         
@@ -266,13 +276,13 @@ class RegionService:
     
     def get_regions(self) -> Tuple:
         """Get loaded regions"""
-        if not self.regions_loaded:
+        if not self.regions_loaded or self.regions is None:
             raise RegionLoadError("Regions not loaded. Call load_regions() first.")
         return self.regions
     
     def get_thresholds(self) -> dict:
         """Get loaded thresholds"""
-        if not self.regions_loaded:
+        if not self.regions_loaded or self.thresholds is None:
             raise RegionLoadError("Regions not loaded. Call load_regions() first.")
         return self.thresholds
 
@@ -396,7 +406,8 @@ class ParkingSpaceService:
         self.model_service.load_model()
         self.region_service.load_regions()
         
-        # Initialize timing        self.last_time_processed = time.time() - self.config.processing.interval_seconds
+        # Initialize timing
+        self.last_time_processed = time.time() - self.config.processing.interval_seconds
         
         self.logger.info("System initialization complete")
     
@@ -407,7 +418,7 @@ class ParkingSpaceService:
         try:
             while True:
                 ret, frame = self.video_service.read_frame()
-                if not ret:
+                if not ret or frame is None:
                     self.logger.info("End of video reached")
                     break
                   # Check if it's time to process frame
@@ -438,7 +449,7 @@ class ParkingSpaceService:
             self.video_service.release()
             self._log_final_report()
     
-    def _process_single_frame(self, frame: np.ndarray, current_time: float) -> None:
+    def _process_single_frame(self, frame: np.ndarray, current_time: float) -> bool:
         """Process a single frame"""
         self.performance_monitor.start_frame_processing()
         self.last_time_processed = current_time

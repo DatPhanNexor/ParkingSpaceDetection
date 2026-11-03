@@ -1,11 +1,45 @@
 # src/parkingspace/pipeline.py
 
+import os
 import cv2
 import numpy as np
-import random
-import time
-import torch
 from .utils import get_contour_center
+
+_PROB_MAP_CACHE = {}
+_MORPH_KERNEL_5X5 = np.ones((5, 5), np.uint8)
+
+
+def _load_probability_map(prob_map_path, target_shape):
+    """Load and optionally resize grayscale probability map with mtime-aware caching."""
+    if isinstance(prob_map_path, np.ndarray):
+        prob_map = prob_map_path
+        if prob_map.shape != target_shape:
+            prob_map = cv2.resize(prob_map, (target_shape[1], target_shape[0]), interpolation=cv2.INTER_NEAREST)
+        return prob_map
+
+    path_str = os.fspath(prob_map_path)
+    try:
+        stat_res = os.stat(path_str)
+        cache_key = (os.path.abspath(path_str), stat_res.st_mtime_ns, stat_res.st_size, target_shape)
+    except OSError:
+        cache_key = None
+
+    if cache_key is not None and cache_key in _PROB_MAP_CACHE:
+        return _PROB_MAP_CACHE[cache_key]
+
+    prob_map = cv2.imread(path_str, cv2.IMREAD_GRAYSCALE)
+    if prob_map is None:
+        raise Exception(f"Failed to load probability map: {prob_map_path}")
+
+    if prob_map.shape != target_shape:
+        prob_map = cv2.resize(prob_map, (target_shape[1], target_shape[0]), interpolation=cv2.INTER_NEAREST)
+
+    if cache_key is not None:
+        if len(_PROB_MAP_CACHE) >= 16:
+            _PROB_MAP_CACHE.clear()
+        _PROB_MAP_CACHE[cache_key] = prob_map
+
+    return prob_map
 
 def verify_nearby_vehicle(
     contour, vehicle_mask, aspect_ratio,
@@ -78,17 +112,14 @@ def process_frame(
     close_perp, far_side, close_side, far_perp, small_park,
     ignore_regions
 ):
-    # 1) Load probability map
-    prob_map = cv2.imread(prob_map_path, cv2.IMREAD_GRAYSCALE)
-    if prob_map is None:
-        raise Exception(f"Failed to load probability map: {prob_map_path}")
+    # 1) Load probability map (with mtime-aware caching)
+    prob_map = _load_probability_map(prob_map_path, frame.shape[:2])
 
-    # Resize if needed
-    if prob_map.shape != frame.shape[:2]:
-        prob_map = cv2.resize(prob_map, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
-
-    # 2) Invert vehicle mask
-    vehicle_mask_scaled = (vehicle_mask * 255).astype(np.uint8)
+    # 2) Invert vehicle mask (safe for both {0, 1} and {0, 255} binary masks)
+    if vehicle_mask.size > 0 and vehicle_mask.max() > 1:
+        vehicle_mask_scaled = np.where(vehicle_mask > 0, 255, 0).astype(np.uint8)
+    else:
+        vehicle_mask_scaled = (vehicle_mask * 255).astype(np.uint8)
     mask_img_inv = cv2.bitwise_not(vehicle_mask_scaled)
 
     # 3) Combine with probability map
@@ -96,9 +127,7 @@ def process_frame(
 
     # 4) Binarize & morphological ops
     _, binary_map = cv2.threshold(prob_map_combined, 50, 255, cv2.THRESH_BINARY)
-    kernel_size = 5
-    kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    eroded_image = cv2.erode(binary_map, kernel, iterations=6)
+    eroded_image = cv2.erode(binary_map, _MORPH_KERNEL_5X5, iterations=6)
 
     # 5) Find potential contours
     contours, _ = cv2.findContours(eroded_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

@@ -103,13 +103,12 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                 ),
               ],
               if (widget.isAdmin)
-                if (widget.isAdmin)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
-                      child: _ResetShiftSection(state: state),
-                    ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                    child: _ResetShiftSection(state: state),
                   ),
+                ),
               const SliverToBoxAdapter(child: SizedBox(height: 24)),
             ],
           ),

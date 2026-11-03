@@ -18,8 +18,9 @@ class PerformanceMetrics:
 class PerformanceMonitor:
     """Monitor and track performance metrics"""
     
-    def __init__(self):
+    def __init__(self, max_history: int = 1000):
         self.logger = get_logger(__name__)
+        self.max_history = max(1, int(max_history))
         self.metrics_history: List[PerformanceMetrics] = []
         self.start_time = None
         
@@ -68,6 +69,8 @@ class PerformanceMonitor:
         )
         
         self.metrics_history.append(metrics)
+        if len(self.metrics_history) > self.max_history:
+            del self.metrics_history[:-self.max_history]
         self.start_time = None
         
         return metrics
@@ -77,7 +80,7 @@ class PerformanceMonitor:
         
         Args:
             last_n: Number of recent frames to average
-            what
+
         Returns:
             Average performance metrics or None if no data
         """

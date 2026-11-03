@@ -10,9 +10,8 @@ import sys
 import time
 import psutil
 import platform
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from pathlib import Path
 
 from .logger import get_logger
 
@@ -36,7 +35,7 @@ class SystemCapabilities:
     
     # Performance
     estimated_performance_level: str  # "low", "medium", "high", "ultra"
-    recommended_settings: Dict[str, any]
+    recommended_settings: Dict[str, Any]
 
 
 @dataclass
@@ -72,7 +71,12 @@ class CapabilityDetector:
         self.logger.info("🔍 Detecting system capabilities...")
         
         # CPU Information
-        cpu_count = psutil.cpu_count(logical=False)  # Physical cores
+        cpu_count = (
+            psutil.cpu_count(logical=False)
+            or psutil.cpu_count(logical=True)
+            or os.cpu_count()
+            or 1
+        )  # Physical cores with safe fallback
         cpu_brand = self._get_cpu_brand()
         
         # Memory Information
@@ -118,20 +122,20 @@ class CapabilityDetector:
             if platform.system() == "Windows":
                 import subprocess
                 result = subprocess.run(
-                    ['wmic', 'cpu', 'get', 'name'], 
-                    capture_output=True, text=True
+                    ['wmic', 'cpu', 'get', 'name'],
+                    capture_output=True, text=True, timeout=2
                 )
-                lines = result.stdout.strip().split('\n')
+                lines = [ln.strip() for ln in result.stdout.strip().split('\n') if ln.strip()]
                 if len(lines) > 1:
-                    return lines[1].strip()
+                    return lines[1]
             elif platform.system() == "Linux":
                 with open('/proc/cpuinfo', 'r') as f:
                     for line in f:
                         if 'model name' in line:
                             return line.split(':', 1)[1].strip()
-        except:
+        except Exception:
             pass
-        return "Unknown CPU"
+        return platform.processor().strip() or "Unknown CPU"
     
     def _detect_gpu(self) -> Tuple[bool, List[str], Optional[float]]:
         """Detect GPU capabilities"""
@@ -208,9 +212,9 @@ class CapabilityDetector:
             return "low"
     
     def _generate_recommendations(self, performance_level: str, has_cuda: bool, 
-                                memory_gb: float, cpu_count: int) -> Dict[str, any]:
+                                memory_gb: float, cpu_count: int) -> Dict[str, Any]:
         """Generate optimization recommendations based on capabilities"""
-        recommendations = {
+        recommendations: Dict[str, Any] = {
             "device": "cuda" if has_cuda else "cpu",
             "enable_cuda_benchmark": has_cuda,
             "use_half_precision": has_cuda and performance_level in ["high", "ultra"],

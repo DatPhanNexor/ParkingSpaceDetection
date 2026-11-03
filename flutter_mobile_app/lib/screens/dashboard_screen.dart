@@ -219,12 +219,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     itemCount: sessions.sessions.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
+                      final session = sessions.sessions[index];
                       final card = _ActiveSessionCard(
-                        session: sessions.sessions[index],
+                        session: session,
                       );
-                      if (widget.user.isAdmin) {
+                      if (widget.user.isAdmin && session.status != 'pending') {
                         return Dismissible(
-                          key: Key(sessions.sessions[index].id),
+                          key: Key(session.id),
                           direction: DismissDirection.endToStart,
                           background: Container(
                             alignment: Alignment.centerRight,
@@ -263,9 +264,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                             try {
                               await ref
                                   .read(activeSessionsProvider.notifier)
-                                  .deleteSession(sessions.sessions[index].id);
-                              if (context.mounted)
+                                  .deleteSession(session.id);
+                              if (context.mounted) {
                                 widget.onRefreshAll(silent: true);
+                              }
                             } catch (e) {
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -578,6 +580,10 @@ class _SectionHeader extends StatelessWidget {
             trailing!,
             style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
+        if (action != null) ...[
+          const SizedBox(width: 8),
+          action!,
+        ],
       ],
     );
   }

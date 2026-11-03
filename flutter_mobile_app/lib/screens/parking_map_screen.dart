@@ -75,7 +75,7 @@ class ParkingMapScreen extends ConsumerWidget {
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
                       child: _SessionCard(session: session),
                     );
-                    if (isAdmin) {
+                    if (isAdmin && session.status != 'pending') {
                       return Dismissible(
                         key: Key(session.id),
                         direction: DismissDirection.endToStart,
@@ -123,10 +123,11 @@ class ParkingMapScreen extends ConsumerWidget {
                             await ref
                                 .read(activeSessionsProvider.notifier)
                                 .deleteSession(session.id);
-                            if (context.mounted)
+                            if (context.mounted) {
                               ref
                                   .read(activeSessionsProvider.notifier)
                                   .fetch(silent: true);
+                            }
                           } catch (e) {
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(

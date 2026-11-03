@@ -28,7 +28,8 @@ def test_normal_startup():
     print("-" * 30)
     
     # Add src to path
-    sys.path.insert(0, str(Path(__file__).parent / 'src'))
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     
     start_time = time.time()
     
